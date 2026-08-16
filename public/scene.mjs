@@ -25,28 +25,51 @@ export const STATIONS = {
   cabinet:    { x: 862, y: 545, label: 'ARQUIVO MORTO' },
 };
 
-// 1º andar: cinco cômodos lado a lado acima do térreo.
+// Andares empilhados: cada um tem cinco cômodos lado a lado. O 1º andar (andar
+// 0) fica logo acima do térreo; cada andar novo (issue #7) sobe sobre o
+// anterior. O cômodo é endereçado por um índice global: andar = ⌊slot / 5⌋,
+// coluna = slot % 5. O andar 0 nunca muda de geometria, então o cômodo do
+// principal (MAIN_ROOM) tem endereço constante a sessão inteira.
 export const ROOMS_PER_FLOOR = 5;
-export const FLOOR = { top: 40, bottom: GROUND.y - 14 };  // cômodos de y=40 a y=456
+export const FLOOR = { top: 40, bottom: GROUND.y - 14 };  // andar 0: y=40 a y=456
 const ROOM_W = PLAN.w / ROOMS_PER_FLOOR;                  // 200
+const FLOOR_H = FLOOR.bottom - FLOOR.top;                 // 416
+const SLAB = 14;                                          // laje entre andares
+const FLOOR_PITCH = FLOOR_H + SLAB;                       // quanto cada andar sobe
 
-/** Retângulo do cômodo de índice `i`. É a única fonte de geometria do cômodo. */
-export function roomRect(i) {
+// Cômodo reservado ao agente principal: sempre no andar 0, nunca reciclado.
+export const MAIN_ROOM = 0;
+
+/** Retângulo do cômodo do slot global `slot`. Única fonte de geometria. */
+export function roomRect(slot) {
+  const floor = Math.floor(slot / ROOMS_PER_FLOOR);
+  const col = slot % ROOMS_PER_FLOOR;
   const pad = 12;
   return {
-    index: i,
-    x: i * ROOM_W + pad,
-    y: FLOOR.top,
-    w: ROOM_W - pad * 2,          // 176
-    h: FLOOR.bottom - FLOOR.top,  // 416
-    cx: i * ROOM_W + ROOM_W / 2,  // centro horizontal
+    index: slot,
+    floor,
+    col,
+    x: col * ROOM_W + pad,
+    y: FLOOR.top - floor * FLOOR_PITCH,   // andares acima têm y menor
+    w: ROOM_W - pad * 2,                  // 176
+    h: FLOOR_H,                           // 416
+    cx: col * ROOM_W + ROOM_W / 2,        // centro horizontal
   };
 }
 
+/** Quantos andares o prédio tem agora. Deriva da ocupação: andar vazio some. */
+export function floorCount(scene) {
+  let max = 0;
+  for (const a of scene.agents.values()) {
+    if (a.room != null) max = Math.max(max, Math.floor(a.room / ROOMS_PER_FLOOR));
+  }
+  return max + 1;
+}
+
 /** Onde o robô fica parado no cômodo: centro, junto à base (perto do elevador). */
-function roomHome(i) {
-  const r = roomRect(i);
-  return { x: r.cx, y: FLOOR.bottom - 46 };
+function roomHome(slot) {
+  const r = roomRect(slot);
+  return { x: r.cx, y: r.y + r.h - 46 };
 }
 
 /** Posição do n-ésimo móvel dentro de um cômodo. Grade de duas colunas. */
@@ -57,16 +80,16 @@ function propSlot(r, n) {
     x: r.cx + (col === 0 ? -40 : 40),
     // Presa ao cômodo: com muitos móveis a coluna empilha até a base e para,
     // para nenhum móvel escapar do cômodo do dono.
-    y: Math.min(FLOOR.top + 78 + row * 58, FLOOR.bottom - 70),
+    y: Math.min(r.y + 78 + row * 58, r.y + r.h - 70),
   };
 }
 
 /** Onde o robô encosta para usar um móvel do próprio cômodo. */
-function standAt(prop, i) {
-  const r = roomRect(i);
+function standAt(prop, slot) {
+  const r = roomRect(slot);
   return {
     x: Math.max(r.x + 18, Math.min(prop.x, r.x + r.w - 18)),
-    y: Math.min(prop.y + 44, FLOOR.bottom - 40),
+    y: Math.min(prop.y + 44, r.y + r.h - 40),
   };
 }
 
@@ -79,14 +102,52 @@ export function createScene() {
 
 // ── cômodos ────────────────────────────────────────────────────────────────
 
-/** Índice do primeiro cômodo livre. Vagas recicladas contam como livres. */
-function allocRoom(scene, except) {
+/**
+ * Índice do primeiro cômodo livre. Vagas recicladas contam como livres. O
+ * prédio cresce para cima quando o andar enche: o sexto agente pega o slot 5,
+ * que é o primeiro cômodo do 2º andar. O cômodo do principal fica reservado
+ * enquanto ele estiver no prédio, para o olho ter um ponto de retorno.
+ */
+function allocRoom(scene, agent) {
+  if (agent.isMain) return MAIN_ROOM;
   const taken = new Set();
-  for (const a of scene.agents.values()) if (a !== except && a.room != null) taken.add(a.room);
-  for (let i = 0; i < ROOMS_PER_FLOOR; i++) if (!taken.has(i)) return i;
-  // Andar cheio: o crescimento para o 2º andar é a issue #7. Até lá, o excesso
-  // reaproveita o último cômodo — nenhum cenário de #4 chega a seis agentes.
-  return ROOMS_PER_FLOOR - 1;
+  let mainPresent = false;
+  for (const a of scene.agents.values()) {
+    if (a === agent) continue;
+    if (a.isMain) mainPresent = true;
+    if (a.room != null) taken.add(a.room);
+  }
+  if (mainPresent) taken.add(MAIN_ROOM);
+  for (let i = 0; ; i++) if (!taken.has(i)) return i;
+}
+
+/**
+ * Muda um agente de cômodo, levando os móveis dele junto. Usado quando o
+ * principal aparece depois que um subagente já ocupou o cômodo reservado —
+ * raro (o principal costuma ser o primeiro a agir), mas mantém o endereço do
+ * principal constante mesmo assim. Posição não é estável entre eventos, então
+ * realocar é legítimo aqui.
+ */
+function relocateAgent(scene, agent, cmds) {
+  const from = agent.room;
+  const taken = new Set([MAIN_ROOM]);
+  for (const a of scene.agents.values()) if (a !== agent && a.room != null) taken.add(a.room);
+  let dst = 0;
+  while (taken.has(dst)) dst++;
+
+  agent.room = dst;
+  const home = roomHome(dst);
+  agent.x = home.x;
+  agent.y = home.y;
+  cmds.push({ op: 'agent-move', id: agent.id, x: home.x, y: home.y, face: agent.face });
+
+  const dy = roomRect(dst).y - roomRect(from).y;
+  for (const p of scene.props.values()) {
+    if (p.owner === agent.id) {
+      p.y += dy;
+      cmds.push({ op: 'prop-move', prop: p });
+    }
+  }
 }
 
 // ── agentes e móveis ──────────────────────────────────────────────────────
@@ -108,6 +169,12 @@ function ensureAgent(scene, id, type, cmds) {
       deskCursor: 0,
       since: Date.now(),
     };
+    // Se um subagente já tomou o cômodo reservado do principal, ele cede a vaga
+    // antes de o principal entrar.
+    if (isMain) {
+      const squatter = [...scene.agents.values()].find((o) => o.room === MAIN_ROOM);
+      if (squatter) relocateAgent(scene, squatter, cmds);
+    }
     a.room = allocRoom(scene, a);
     const home = roomHome(a.room);
     a.x = home.x;
@@ -229,6 +296,14 @@ export function apply(scene, ev) {
       moveTo(scene, a, DOOR.x, DOOR.y, cmds);
       if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'result' });
       cmds.push({ op: 'agent-leave', id: a.id });
+      // O cômodo é esvaziado: os móveis do ocupante somem com ele, para não
+      // ficarem para o próximo que reciclar a vaga. Estações (dono nulo) ficam.
+      for (const [key, p] of scene.props) {
+        if (p.owner === a.id) {
+          scene.props.delete(key);
+          cmds.push({ op: 'prop-remove', key });
+        }
+      }
       // O cômodo é liberado: some do elenco e a vaga volta ao pool.
       scene.agents.delete(a.id);
       break;

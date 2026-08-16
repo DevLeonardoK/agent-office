@@ -156,6 +156,25 @@ function hitProp(prop) {
   n.timer = setTimeout(() => n.root.classList.remove('hit'), 2600);
 }
 
+// O móvel segue o dono quando ele muda de cômodo (realocação da issue #7).
+function moveProp(prop) {
+  const n = propNodes.get(prop.key);
+  if (!n) return;
+  animate(n.root, { x: prop.x, y: prop.y }, WALK);
+}
+
+// O móvel some quando o dono deixa o prédio: o cômodo é esvaziado para o
+// próximo que reciclar a vaga.
+function removeProp(key) {
+  const n = propNodes.get(key);
+  if (!n) return;
+  clearTimeout(n.timer);
+  propNodes.delete(key);
+  animate(n.root, { opacity: 0, scale: 0.8 }, { duration: REDUCED ? 0 : 0.3 })
+    .finished.then(() => n.root.remove())
+    .catch(() => n.root.remove());
+}
+
 // ── o boneco ──────────────────────────────────────────────────────────────
 
 // Figura de escala: cabeça, tronco, dois braços e duas pernas, com as juntas
@@ -304,7 +323,8 @@ function renderDoors() {
     if (a.status === 'leaving') plate.dataset.leaving = '';
     plate.textContent = a.isMain ? 'principal' : a.type;
     plate.style.left = r.cx + 'px';
-    plate.style.top = FLOOR.top + 'px';
+    // A plaqueta acompanha o andar do cômodo, não o topo fixo do 1º andar.
+    plate.style.top = r.y + 'px';
     $doors.appendChild(plate);
   }
 }
@@ -368,6 +388,8 @@ function run(cmds) {
     switch (c.op) {
       case 'prop-add': mountProp(c.prop); break;
       case 'prop-hit': hitProp(c.prop); break;
+      case 'prop-move': moveProp(c.prop); break;
+      case 'prop-remove': removeProp(c.key); break;
       case 'agent-enter':
         mountAgent(c.agent, c.instant);
         touchedCast = true;

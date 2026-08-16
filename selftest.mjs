@@ -10,7 +10,7 @@
 
 import {
   createScene, apply, hydrate, roomRect, ROOMS_PER_FLOOR, FLOOR, GROUND,
-  PLAN, DOOR, STATIONS,
+  PLAN, DOOR, STATIONS, MAIN_ROOM, floorCount,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
@@ -41,14 +41,26 @@ function violations(s) {
   const bad = [];
   const agents = [...s.agents.values()];
 
-  // No máximo um ocupante por cômodo; nenhum andar excede cinco agentes.
+  // No máximo um ocupante por cômodo; todo cômodo tem endereço inteiro válido.
   const byRoom = new Map();
   for (const a of agents) {
     if (byRoom.has(a.room)) bad.push(`cômodo ${a.room} com dois ocupantes`);
     byRoom.set(a.room, a);
-    if (a.room < 0 || a.room >= ROOMS_PER_FLOOR) bad.push(`agente ${a.id} fora dos cômodos`);
+    if (a.room == null || a.room < 0 || !Number.isInteger(a.room)) bad.push(`agente ${a.id} sem cômodo válido`);
   }
-  if (agents.length > ROOMS_PER_FLOOR) bad.push(`andar com ${agents.length} agentes`);
+
+  // Nenhum andar excede cinco agentes; nenhum andar vazio existe entre o térreo
+  // e o topo (o prédio cresce e encolhe sem deixar andar oco no meio).
+  const perFloor = new Map();
+  for (const a of agents) {
+    const f = Math.floor(a.room / ROOMS_PER_FLOOR);
+    perFloor.set(f, (perFloor.get(f) || 0) + 1);
+  }
+  for (const [f, n] of perFloor) if (n > ROOMS_PER_FLOOR) bad.push(`andar ${f} com ${n} agentes`);
+  if (perFloor.size) {
+    const maxF = Math.max(...perFloor.keys());
+    for (let f = 0; f <= maxF; f++) if (!perFloor.has(f)) bad.push(`andar ${f} vazio abaixo do topo`);
+  }
 
   // Todo robô dentro do seu cômodo.
   for (const a of agents) {
@@ -197,6 +209,84 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   apply(s, evt({ kind: 'prompt', text: 'oi' }));
   const main = s.agents.get('main');
   ok('o principal ocupa um cômodo do 1º andar', main.room >= 0 && main.room < ROOMS_PER_FLOOR && insideRoom(main.x, main.y, main.room));
+}
+
+// ── o sexto agente inaugura o 2º andar (issue #7) ───────────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
+
+  ok('seis agentes cabem no prédio', s.agents.size === 6);
+  ok('o 1º andar ainda tem exatamente cinco', [...s.agents.values()].filter((a) => Math.floor(a.room / ROOMS_PER_FLOOR) === 0).length === ROOMS_PER_FLOOR);
+  ok('o sexto abre o 2º andar', floorCount(s) === 2 && [...s.agents.values()].some((a) => Math.floor(a.room / ROOMS_PER_FLOOR) === 1));
+  { const v = invariantsHold(s); ok('invariantes valem com dois andares', v.ok, v.detail); }
+}
+
+// ── o cômodo é esvaziado dos móveis do ocupante anterior (issue #7) ──────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
+  const c1 = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('velho.ts') }));
+  ok('o móvel do primeiro nasce', s.props.has('a1|file:velho.ts') && cmdsOf(c1, 'prop-add').length === 1);
+  const room1 = s.agents.get('a1').room;
+
+  const c2 = apply(s, evt({ kind: 'stop', agentId: 'a1', agentType: 'Explore', text: 'saí' }));
+  ok('a saída remove o móvel do ocupante', !s.props.has('a1|file:velho.ts') && cmdsOf(c2, 'prop-remove').length === 1);
+
+  apply(s, evt({ kind: 'spawn', agentId: 'a2', agentType: 'Plan' }));
+  apply(s, evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'Read', prop: deskProp('novo.ts') }));
+  ok('o próximo recicla a vaga já vazia', s.agents.get('a2').room === room1);
+  ok('nenhuma mobília do anterior sobra no cômodo', ![...s.props.values()].some((p) => p.owner === 'a1'));
+  { const v = invariantsHold(s); ok('invariantes valem após reciclar a vaga', v.ok, v.detail); }
+}
+
+// ── andar sem ocupantes é demolido (issue #7) ───────────────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
+  ok('o prédio tem dois andares com seis agentes', floorCount(s) === 2);
+
+  // Some o único ocupante do 2º andar; o andar deixa de existir.
+  const upstairs = [...s.agents.values()].find((a) => Math.floor(a.room / ROOMS_PER_FLOOR) === 1);
+  apply(s, evt({ kind: 'stop', agentId: upstairs.id, agentType: upstairs.type, text: 'saí' }));
+  ok('o 2º andar é demolido ao esvaziar', floorCount(s) === 1);
+  ok('ninguém sobra acima do 1º andar', ![...s.agents.values()].some((a) => a.room >= ROOMS_PER_FLOOR));
+  { const v = invariantsHold(s); ok('invariantes valem após demolir o andar', v.ok, v.detail); }
+}
+
+// ── o endereço do cômodo do principal não muda a sessão inteira (issue #7) ───
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
+  const addr = s.agents.get('main').room;
+  ok('o principal nasce no cômodo reservado', addr === MAIN_ROOM);
+
+  // Enche o prédio, abre e demole o 2º andar, tudo em volta do principal.
+  for (let i = 0; i < ROOMS_PER_FLOOR + 1; i++) apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
+  for (let i = 0; i < ROOMS_PER_FLOOR + 1; i++) apply(s, evt({ kind: 'stop', agentId: 'sub' + i, agentType: 'Explore', text: 'tchau' }));
+  const main = s.agents.get('main');
+  ok('o endereço do principal ficou constante', main.room === addr && main.room === MAIN_ROOM);
+  ok('o principal segue no 1º andar', Math.floor(main.room / ROOMS_PER_FLOOR) === 0 && insideRoom(main.x, main.y, main.room));
+}
+
+// ── o principal chega depois dos subagentes e ainda pega o cômodo dele ───────
+{
+  const s = createScene();
+  // Cinco subagentes tomam o andar antes de o principal aparecer.
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
+    apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
+    apply(s, evt({ kind: 'tool_start', agentId: 'sub' + i, agentType: 'Explore', tool: 'Read', prop: deskProp('f' + i + '.ts') }));
+  }
+  const squatter = [...s.agents.values()].find((a) => a.room === MAIN_ROOM);
+  const c = apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'cheguei' }));
+  const main = s.agents.get('main');
+  ok('o principal toma o cômodo reservado', main.room === MAIN_ROOM);
+  ok('o invasor foi realocado', s.agents.get(squatter.id).room !== MAIN_ROOM);
+  ok('o móvel do realocado o acompanha', cmdsOf(c, 'prop-move').length >= 1 &&
+     insideRoom(s.props.get(squatter.id + '|file:f' + squatter.id.slice(3) + '.ts').x, s.props.get(squatter.id + '|file:f' + squatter.id.slice(3) + '.ts').y, s.agents.get(squatter.id).room));
+  { const v = invariantsHold(s); ok('invariantes valem após o principal chegar tarde', v.ok, v.detail); }
 }
 
 // ── entrada estranha não derruba ──────────────────────────────────────────
