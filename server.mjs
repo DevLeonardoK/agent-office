@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // Servidor do escritorio dos agentes.
 //
-// Ouve os eventos dos hooks em UDP, mantem o estado de cada sala (uma por
-// sessao do Claude Code) e transmite tudo para o navegador via SSE.
+// Ouve os eventos dos hooks, traduz cada um para o evento que a cena entende,
+// guarda no buffer da sessao (uma por sessao do Claude Code) e transmite via
+// SSE. Nao mantem cena propria: nem agentes, nem moveis, nem instantaneo
+// montado. Quem monta o predio e o cliente, aplicando a lista de eventos desde
+// o inicio (ADR-0001). O servidor so guarda metadados e a lista de eventos.
 //
 // Zero dependencias: so Node.
 
@@ -35,9 +38,7 @@ function session(id, cwd) {
       label: cwd ? path.basename(cwd) : id.slice(0, 8),
       startedAt: Date.now(),
       lastSeen: Date.now(),
-      agents: new Map(),
-      props: new Map(),
-      history: [],
+      events: [],
     };
     sessions.set(id, s);
   }
@@ -49,86 +50,16 @@ function session(id, cwd) {
   return s;
 }
 
-function agent(s, id, type) {
-  let a = s.agents.get(id);
-  if (!a) {
-    a = {
-      id,
-      type: type || 'claude',
-      isMain: id === 'main',
-      status: 'idle',
-      tool: null,
-      prop: null,
-      spawnedAt: Date.now(),
-      lastSeen: Date.now(),
-      toolCount: 0,
-    };
-    s.agents.set(id, a);
-  }
-  a.lastSeen = Date.now();
-  if (type && type !== 'main') a.type = type;
-  return a;
-}
-
-// Traduz o evento cru do hook em mutacao de estado + evento de animacao.
+// Numera o evento e o guarda no buffer da sessao. Nao monta cena nenhuma: a
+// unica leitura que o servidor faz do conteudo e o `session_end`, que e
+// metadado de sessao (marca a sala como fechada no seletor), nao estado de cena.
 function ingest(ev) {
   const s = session(ev.session, ev.cwd);
-  const a = agent(s, ev.agentId, ev.agentType);
-
-  switch (ev.kind) {
-    case 'spawn':
-      a.status = 'entering';
-      a.spawnedAt = Date.now();
-      break;
-
-    case 'stop':
-      a.status = 'leaving';
-      a.tool = null;
-      a.prop = null;
-      break;
-
-    case 'tool_start':
-      a.status = 'working';
-      a.tool = ev.tool;
-      a.prop = ev.prop?.key || null;
-      a.toolCount++;
-      if (ev.prop) {
-        const p = s.props.get(ev.prop.key) || { ...ev.prop, firstSeen: Date.now(), uses: 0 };
-        p.uses++;
-        p.lastUsed = Date.now();
-        p.detail = ev.prop.detail ?? p.detail;
-        s.props.set(ev.prop.key, p);
-      }
-      break;
-
-    case 'tool_end':
-      // Um Read termina em milissegundos; deixar o boneco parado na mesa por um
-      // instante e o que faz a animacao ser legivel. O front controla o atraso.
-      a.status = 'idle';
-      a.tool = null;
-      break;
-
-    case 'prompt':
-      // Turno novo: todo mundo que ficou pendurado volta a ser irrelevante.
-      for (const other of s.agents.values()) {
-        if (!other.isMain && Date.now() - other.lastSeen > 60_000) s.agents.delete(other.id);
-      }
-      a.status = 'idle';
-      break;
-
-    case 'turn_end':
-      a.status = 'idle';
-      a.tool = null;
-      break;
-
-    case 'session_end':
-      s.closed = true;
-      break;
-  }
+  if (ev.kind === 'session_end') s.closed = true;
 
   const out = { ...ev, seq: ++seq };
-  s.history.push(out);
-  if (s.history.length > HISTORY) s.history.shift();
+  s.events.push(out);
+  if (s.events.length > HISTORY) s.events.shift();
   return out;
 }
 
@@ -156,9 +87,7 @@ function snapshot() {
         cwd: s.cwd,
         closed: !!s.closed,
         lastSeen: s.lastSeen,
-        agents: [...s.agents.values()],
-        props: [...s.props.values()],
-        history: s.history,
+        events: s.events,
       })),
   };
 }

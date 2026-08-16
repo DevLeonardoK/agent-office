@@ -215,30 +215,23 @@ export function apply(scene, ev) {
   return cmds;
 }
 
-/** Reconstrói a cena a partir do estado que o servidor guarda (troca de sala). */
-export function hydrate(scene, room) {
+/**
+ * Reconstrói a cena aplicando a lista de eventos desde o início — é assim que
+ * um cliente que chega no meio (recarregar a página, trocar de sessão) monta o
+ * prédio, sem depender de nenhum instantâneo montado pelo servidor (ADR-0001).
+ *
+ * Construir ao vivo é a mesma construção, só que ainda não terminada: por isso
+ * `rebuild` é `apply` em sequência numa cena limpa. A única diferença é que
+ * cada comando sai marcado como instantâneo — o prédio aparece pronto em vez de
+ * reencenar a caminhada e o balão de fala de cada evento já passado.
+ */
+export function rebuild(scene, events) {
   scene.agents.clear();
   scene.props.clear();
   scene.deskCursor = 0;
   const cmds = [];
-  if (!room) return cmds;
-
-  for (const seed of room.props) ensureProp(scene, seed, cmds);
-
-  for (const raw of room.agents) {
-    const enters = [];
-    const a = ensureAgent(scene, raw.id, raw.type, enters);
-    a.status = raw.status === 'working' ? 'working' : 'idle';
-    a.tool = raw.tool;
-    a.toolCount = raw.toolCount || 0;
-    a.propKey = raw.prop || null;
-
-    // Ao trocar de sala ninguém "chega": todo mundo já está no lugar.
-    const p = a.propKey && scene.props.get(a.propKey);
-    const spot = p ? station(p) : a.home;
-    a.x = spot.x;
-    a.y = spot.y;
-    for (const c of enters) cmds.push({ ...c, instant: true });
+  for (const ev of events || []) {
+    for (const c of apply(scene, ev)) cmds.push({ ...c, instant: true });
   }
   return cmds;
 }

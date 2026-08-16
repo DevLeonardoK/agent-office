@@ -5,7 +5,7 @@
 //
 //   node selftest.mjs
 
-import { createScene, apply, hydrate, station, PLAN, DOOR, STATIONS } from './public/scene.mjs';
+import { createScene, apply, rebuild, PLAN, DOOR, STATIONS } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -93,20 +93,42 @@ const deskProp = (name) => ({ kind: 'desk', key: 'file:' + name, label: name });
   ok('some do elenco', !s.agents.has('a1'));
 }
 
-// ── troca de sala ─────────────────────────────────────────────────────────
+// ── reconstrução a partir do log (recarregar / trocar de sessão) ──────────
 {
+  const events = [
+    evt({ kind: 'tool_start', agentId: 'main', agentType: 'main', tool: 'Read', prop: deskProp('velho.ts') }),
+    evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }),
+    evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }),
+  ];
   const s = createScene();
-  apply(s, evt({ kind: 'tool_start', tool: 'Read', prop: deskProp('velho.ts') }));
-  const c = hydrate(s, {
-    props: [{ kind: 'desk', key: 'file:novo.ts', label: 'novo.ts' }, { kind: 'terminal', key: 'terminal', label: 'terminal' }],
-    agents: [{ id: 'main', type: 'main', status: 'working', tool: 'Bash', prop: 'terminal', toolCount: 3 }],
-  });
-  ok('sala antiga é esvaziada', !s.props.has('file:velho.ts'));
-  ok('sala nova é montada', s.props.size === 2 && s.agents.size === 1);
-  ok('o agente é recolocado no móvel', cmdsOf(c, 'agent-enter')[0].instant === true);
-  const m = s.agents.get('main');
-  const t = s.props.get('terminal');
-  ok('recolocado junto do terminal', Math.hypot(m.x - t.x, m.y - t.y) < 115);
+  const c = rebuild(s, events);
+  ok('rebuild parte de uma cena vazia', s.deskCursor === 1);   // só o velho.ts foi para a mesa
+  ok('rebuild monta os móveis do log', s.props.size === 2);
+  ok('rebuild monta os agentes do log', s.agents.size === 2);
+  ok('rebuild entra instantâneo', cmdsOf(c, 'agent-enter').every((e) => e.instant === true));
+  ok('rebuild não anima o movimento', cmdsOf(c, 'agent-move').every((m) => m.instant === true));
+}
+
+// ── pureza (ADR-0001): reconstruir do log é idêntico ao construído ao vivo ─
+{
+  const events = [
+    evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }),
+    evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('auth.ts') }),
+    evt({ kind: 'spawn', agentId: 'a2', agentType: 'Plan' }),
+    evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'Read', prop: deskProp('auth.ts') }),
+    evt({ kind: 'tool_start', agentId: 'main', agentType: 'main', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }),
+  ];
+
+  const live = createScene();
+  for (const ev of events) apply(live, ev);   // ao vivo: um evento de cada vez
+
+  const rebuilt = createScene();
+  rebuild(rebuilt, events);                    // reconstruído: o log inteiro de uma vez
+
+  const posA = (s) => [...s.agents.values()].map((a) => `${a.id}:${a.x},${a.y}`).sort().join('|');
+  const posP = (s) => [...s.props.values()].map((p) => `${p.key}:${p.x},${p.y}`).sort().join('|');
+  ok('agentes reconstruídos idênticos ao ao vivo', posA(live) === posA(rebuilt), `${posA(live)} ≠ ${posA(rebuilt)}`);
+  ok('móveis reconstruídos idênticos ao ao vivo', posP(live) === posP(rebuilt), `${posP(live)} ≠ ${posP(rebuilt)}`);
 }
 
 // ── entrada estranha não derruba ──────────────────────────────────────────
