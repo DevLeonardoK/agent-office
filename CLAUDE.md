@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `motion.dev` está vendorizada em
 `public/vendor/motion.js` como bundle fechado.
 
 ```
-node selftest.mjs        # 29 verificações sobre scene.mjs + sintaxe do renderizador
+node selftest.mjs        # 39 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
