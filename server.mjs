@@ -151,7 +151,13 @@ const server = http.createServer((req, res) => {
       res.writeHead(404).end('nao encontrado');
       return;
     }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+    // Sem cache: o navegador guardava o office.js por heuristica (nenhum
+    // cabeçalho dizia o contrario) e servia a versao anterior depois de uma
+    // mudanca no renderizador. Isto aqui e um servidor de desenvolvimento.
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+      'Cache-Control': 'no-store',
+    });
     res.end(data);
   });
 });
