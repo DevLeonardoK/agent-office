@@ -46,9 +46,6 @@ export function roomRect(slot) {
   const col = slot % ROOMS_PER_FLOOR;
   const pad = 12;
   return {
-    index: slot,
-    floor,
-    col,
     x: col * ROOM_W + pad,
     y: FLOOR.top - floor * FLOOR_PITCH,   // andares acima têm y menor
     w: ROOM_W - pad * 2,                  // 176
@@ -237,6 +234,20 @@ function moveTo(scene, a, x, y, cmds, extra) {
   cmds.push({ op: 'agent-move', id: a.id, x, y, face: a.face, ...extra });
 }
 
+// Volta o agente ao próprio cômodo, ocioso. De elevador se estava lá embaixo
+// numa estação (issue #9).
+function returnHome(scene, a, cmds) {
+  const wasAway = a.away;
+  a.status = 'idle';
+  a.tool = null;
+  a.propKey = null;
+  a.away = false;
+  a.since = Date.now();
+  const home = roomHome(a.room);
+  moveTo(scene, a, home.x, home.y, cmds, wasAway ? { elevator: true } : undefined);
+  cmds.push({ op: 'agent-state', agent: a });
+}
+
 // ── redutor ───────────────────────────────────────────────────────────────
 
 /**
@@ -303,19 +314,9 @@ export function apply(scene, ev) {
       break;
     }
 
-    case 'tool_end': {
-      const wasAway = a.away;
-      a.status = 'idle';
-      a.tool = null;
-      a.propKey = null;
-      a.away = false;
-      a.since = Date.now();
-      const home = roomHome(a.room);
-      // Volta de elevador se estava lá embaixo numa estação (issue #9).
-      moveTo(scene, a, home.x, home.y, cmds, wasAway ? { elevator: true } : undefined);
-      cmds.push({ op: 'agent-state', agent: a });
+    case 'tool_end':
+      returnHome(scene, a, cmds);
       break;
-    }
 
     case 'stop':
       a.status = 'leaving';
@@ -340,19 +341,10 @@ export function apply(scene, ev) {
       cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'order' });
       break;
 
-    case 'turn_end': {
-      const wasAway = a.away;
-      a.status = 'idle';
-      a.tool = null;
-      a.propKey = null;
-      a.away = false;
-      a.since = Date.now();
-      const home = roomHome(a.room);
-      moveTo(scene, a, home.x, home.y, cmds, wasAway ? { elevator: true } : undefined);
-      cmds.push({ op: 'agent-state', agent: a });
+    case 'turn_end':
+      returnHome(scene, a, cmds);
       if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'result' });
       break;
-    }
 
     case 'notify':
       cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'brief' });

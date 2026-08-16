@@ -231,7 +231,8 @@ function walkAgent(id, x, y, face, elevator) {
   // não uma caminhada realista: um trajeto curto de ~300 ms. O trajeto normal
   // usa o spring, que preserva velocidade quando interrompido, então mudar de
   // destino no meio do caminho não dá solavanco.
-  const opts = elevator ? (STILL ? { duration: 0 } : { duration: 0.3, ease: 'easeInOut' }) : WALK;
+  let opts = WALK;
+  if (elevator) opts = STILL ? { duration: 0 } : { duration: 0.3, ease: 'easeInOut' };
   const anim = animate(rec.root, { x, y }, opts);
   clearTimeout(rec.walkTimer);
   anim.finished.then(() => rec.root.classList.remove('walking')).catch(() => {});
