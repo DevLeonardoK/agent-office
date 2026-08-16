@@ -37,6 +37,16 @@ A vista de um andar só, enquadrado na tela inteira, com o resto do prédio sob
 um véu. Aberta ao clicar num andar; `esc` volta ao corte vertical.
 _Avoid_: tela cheia (é do navegador), foco, modal
 
+**Poço**:
+A coluna do elevador, à direita da planta, atravessando todos os andares até o
+térreo. Não é cômodo e não conta agente.
+_Avoid_: elevador (é a cabine mais o poço), duto, shaft
+
+**Cabine**:
+A caixa que sobe e desce dentro do poço, levando um robô entre o cômodo dele e
+o térreo. Uma por prédio.
+_Avoid_: elevador, carro, plataforma
+
 ## Quem trabalha
 
 **Robô**:

@@ -6,7 +6,7 @@
 import { animate, stagger } from './vendor/motion.js';
 import {
   createScene, apply, rebuild, PLAN, DOOR, STATIONS, GROUND, FLOOR, ROOMS_PER_FLOOR,
-  roomRect, floorRect, buildingRect, floorCount,
+  roomRect, floorRect, buildingRect, floorCount, SHAFT, shaftRect, cabinRect,
 } from './scene.mjs';
 
 const params = new URLSearchParams(location.search);
@@ -37,6 +37,7 @@ const $logList = el('logList');
 const $logCount = el('logCount');
 const $empty = el('empty');
 const $floors = el('floors');
+const $app = el('app');
 const $viewBack = el('viewBack');
 
 // ── estado do cliente ─────────────────────────────────────────────────────
@@ -60,9 +61,16 @@ const moodOf = (a) => (a.status === 'working' ? 'work' : a.status === 'error' ? 
 
 // ── a planta ──────────────────────────────────────────────────────────────
 
-// Desenha a planta do prédio com `floors` andares empilhados sobre o térreo.
-// Redesenhada por inteiro quando o prédio muda de altura: é barato (algumas
-// dezenas de nós) e evita ter de sincronizar andar a andar.
+// Desenha o prédio com `floors` andares empilhados sobre o térreo.
+//
+// Projeção oblíqua (a "isométrica de prancheta"): a face de frente fica no
+// plano da cena — é nela que os robôs e os móveis vivem, com as coordenadas
+// que o scene.mjs calcula — e o volume vem de duas faces auxiliares, o topo e
+// a lateral, deslocadas pelo vetor de profundidade. Nada que o scene.mjs
+// posiciona passa pela projeção: só a arquitetura ganha corpo.
+const DEPTH = { x: 30, y: -19 };
+const back = (x, y) => [x + DEPTH.x, y + DEPTH.y];
+
 function drawBlueprint(floors) {
   $blueprint.replaceChildren();
   const ns = 'http://www.w3.org/2000/svg';
@@ -81,6 +89,19 @@ function drawBlueprint(floors) {
     });
     t.textContent = text;
   };
+  // Face de profundidade: o mesmo retângulo empurrado para trás, fechado nos
+  // quatro cantos. É o que dá volume sem sair do azul de prancheta.
+  const slab = (x, y, w, h, fill = .07) => {
+    const [bx, by] = back(x, y);
+    add('path', {
+      d: `M${x} ${y}L${bx} ${by}L${bx + w} ${by}L${x + w} ${y}Z`,
+      fill: 'var(--draft)', stroke: 'var(--draft)', 'stroke-width': .6, 'fill-opacity': fill + .04, opacity: .5,
+    });
+    add('path', {
+      d: `M${x + w} ${y}L${bx + w} ${by}L${bx + w} ${by + h}L${x + w} ${y + h}Z`,
+      fill: 'var(--draft)', stroke: 'var(--draft)', 'stroke-width': .6, 'fill-opacity': fill, opacity: .45,
+    });
+  };
 
   // Gradiente arco-íris do agente principal. Vive aqui, no SVG da planta, mas a
   // carcaça do robô o referencia por id de qualquer outro SVG do documento — é
@@ -97,8 +118,10 @@ function drawBlueprint(floors) {
   const W = PLAN.w - M * 2;
   const H = PLAN.h - M - top;
 
-  // parede externa: linha dupla, como em planta de verdade. Sobe junto com o
-  // prédio: o topo é o teto do último andar, a base é o térreo.
+  // Volume do prédio: o teto e a lateral direita, empurrados para trás.
+  slab(M, top, W, H, .03);
+
+  // parede externa: linha dupla, como em planta de verdade
   add('rect', { x: M, y: top, width: W, height: H, fill: 'none', stroke: 'var(--draft)', 'stroke-width': 2, opacity: .55 });
   add('rect', { x: M + 5, y: top + 5, width: W - 10, height: H - 10, fill: 'none', stroke: 'var(--draft)', 'stroke-width': .6, opacity: .3 });
 
@@ -110,38 +133,88 @@ function drawBlueprint(floors) {
     });
   }
 
-  // laje que separa o 1º andar do térreo de serviço
-  line(M, GROUND.y, PLAN.w - M, GROUND.y, .5, 2);
-
   // Um andar de cada vez, de baixo para cima: cinco cômodos separados por
   // divisórias, o vão da porta no topo de cada um, e a laje que o sustenta.
-  const roomW = PLAN.w / ROOMS_PER_FLOOR;
+  const roomW = SHAFT.x / ROOMS_PER_FLOOR;
   for (let f = 0; f < floors; f++) {
     const fr = floorRect(f);
-    const ceiling = fr.y + 12;                    // topo dos cômodos deste andar
+    const ceiling = fr.y + 6;                     // topo dos cômodos deste andar
     const base = ceiling + roomRect(0).h;         // piso deste andar
     for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
-      if (i > 0) line(i * roomW, ceiling, i * roomW, base, .16, 1);
+      if (i > 0) line(i * roomW, ceiling, i * roomW, base, .3, 1);
       const r = roomRect(f * ROOMS_PER_FLOOR + i);
       // vão da porta, sugerido no topo do cômodo
       add('rect', { x: r.cx - 20, y: ceiling - 2, width: 40, height: 4, fill: 'var(--ink)' });
       line(r.cx - 20, ceiling, r.cx - 20, ceiling + 14, .35, 1);
       line(r.cx + 20, ceiling, r.cx + 20, ceiling + 14, .35, 1);
     }
-    // laje entre este andar e o de baixo (o andar 0 apoia na laje do térreo)
-    if (f > 0) line(M, base + 7, PLAN.w - M, base + 7, .4, 2);
-    label(PLAN.w / 2, ceiling - 12, `${f + 1}º ANDAR`, .38);
+    // A laje entre este andar e o de baixo tem espessura: é ela que se lê como
+    // "andar" quando o prédio é olhado de lado.
+    slab(M, base + 3, W, 8, .06);
+    line(M, base + 3, PLAN.w - M, base + 3, .5, 1.6);
+    line(M, base + 11, PLAN.w - M, base + 11, .3, 1);
+    label(SHAFT.x / 2, ceiling - 12, `${f + 1}º ANDAR`, .38);
   }
+
+  // ── o poço do elevador ──────────────────────────────────────────────────
+  // Coluna própria, atravessando os andares até o térreo. A cabine é desenhada
+  // depois, fora do redesenho, porque ela se move.
+  const sh = shaftRect(scene);
+  slab(sh.x, sh.y, sh.w, sh.h, .04);
+  add('rect', {
+    x: sh.x, y: sh.y, width: sh.w, height: sh.h,
+    fill: 'var(--ink)', stroke: 'var(--draft)', 'stroke-width': 1.2, opacity: .9,
+  });
+  // guias do poço e as marcas de parada de cada andar
+  line(sh.x + 12, sh.y, sh.x + 12, sh.y + sh.h, .3, 1);
+  line(sh.x + sh.w - 12, sh.y, sh.x + sh.w - 12, sh.y + sh.h, .3, 1);
+  for (let f = 0; f < floors; f++) {
+    const c = cabinRect(f);
+    line(sh.x + 4, c.y + c.h, sh.x + sh.w - 4, c.y + c.h, .28, 1);
+  }
+  const cap = add('text', {
+    x: sh.x + sh.w / 2, y: sh.y + 12, fill: 'var(--draft)', opacity: .5,
+    'font-family': 'var(--mono)', 'font-size': 9, 'letter-spacing': 3, 'text-anchor': 'middle',
+  });
+  cap.textContent = 'ELEVADOR';
+
+  // A cabine: vive no SVG da planta e é movida pela motion, andar a andar.
+  const cab = cabinRect(-1);
+  $cabin = add('g', { class: 'cabin' });
+  add('rect', {
+    x: cab.x, y: cab.y, width: cab.w, height: cab.h, rx: 2,
+    fill: 'var(--ink)', stroke: 'var(--draft)', 'stroke-width': 1.4, opacity: 1,
+  }, $cabin);
+  add('path', {
+    d: `M${cab.x + cab.w / 2} ${cab.y + 6}v${cab.h - 12}`,
+    stroke: 'var(--draft)', 'stroke-width': .8, opacity: .5,
+  }, $cabin);   // as duas folhas da porta
+  cabinAt = -1;
 
   // térreo de serviço: porta do prédio e as quatro estações
   const d = DOOR;
+  slab(M, GROUND.y, W, GROUND.h - M, .06);
+  line(M, GROUND.y, PLAN.w - M, GROUND.y, .5, 2);
   add('rect', { x: M - 3, y: d.y - 30, width: 11, height: 60, fill: 'var(--ink)' });
   add('path', {
     d: `M${M + 8} ${d.y + 26}A56 56 0 0 0 ${M + 64} ${d.y - 30}`,
     fill: 'none', stroke: 'var(--draft)', 'stroke-width': .9, 'stroke-dasharray': '3 4', opacity: .6,
   });
   for (const s of Object.values(STATIONS)) label(s.x, GROUND.y + GROUND.h - 16, s.label, .5);
-  label(PLAN.w - 96, GROUND.y + 18, 'TÉRREO DE SERVIÇO', .32);
+  label(SHAFT.x - 96, GROUND.y + 18, 'TÉRREO DE SERVIÇO', .32);
+}
+
+// Leva a cabine ao andar pedido (-1 é o térreo). O robô viaja junto: a perna
+// `ride` do trajeto dele tem a mesma duração.
+let $cabin = null;
+let cabinAt = -1;
+const RIDE = { duration: 0.62, ease: [0.32, 0, 0.2, 1] };
+
+function moveCabin(floor) {
+  if (!$cabin || floor === cabinAt) return;
+  cabinAt = floor;
+  const dy = cabinRect(floor).y - cabinRect(-1).y;
+  animate($cabin, { y: dy }, REDUCED ? { duration: 0 } : RIDE);
 }
 
 // ── símbolos de planta para cada móvel ────────────────────────────────────
@@ -218,24 +291,53 @@ function removeProp(key) {
 // deformadas no primeiro frame do print headless. A plaqueta com o `agent_type`
 // fica fora do grupo `flip`, em HTML, para o texto nunca sair espelhado.
 const ROBOT = `
-<svg width="40" height="52" viewBox="0 0 40 52">
-  <ellipse class="drop" cx="20" cy="49" rx="14" ry="3.4"/>
+<svg width="46" height="56" viewBox="0 0 46 56">
+  <ellipse class="drop" cx="23" cy="53" rx="16" ry="3.6"/>
   <g class="flip">
-    <path class="antenna" d="M20 8V3"/>
-    <circle class="beacon" cx="20" cy="2" r="1.8"/>
+    <!-- alça de transporte no topo da carcaça, como nas fotos de referência -->
+    <path class="handle" d="M16 7.5V6a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v1.5"/>
+
+    <!-- esteiras: correia escura com roldana em cada ponta e os dentes no meio -->
     <g class="treads">
-      <rect class="tread" x="2.5" y="38" width="14" height="11" rx="5.5"/>
-      <rect class="tread" x="23.5" y="38" width="14" height="11" rx="5.5"/>
-      <path class="tread-notch" d="M5 40v7M8 40v7M11 40v7M14 40v7M26 40v7M29 40v7M32 40v7M35 40v7"/>
+      <rect class="belt" x="1.5" y="39" width="19" height="12" rx="6"/>
+      <rect class="belt" x="25.5" y="39" width="19" height="12" rx="6"/>
+      <path class="tread-teeth" d="M5 40.5v9M8.5 40.5v9M12 40.5v9M15.5 40.5v9M29 40.5v9M32.5 40.5v9M36 40.5v9M39.5 40.5v9"/>
+      <circle class="roller" cx="6" cy="45" r="3.4"/><circle class="roller" cx="16" cy="45" r="3.4"/>
+      <circle class="roller" cx="30" cy="45" r="3.4"/><circle class="roller" cx="40" cy="45" r="3.4"/>
+      <path class="axle" d="M20.5 45h5"/>
     </g>
-    <rect class="chassis" x="5" y="8" width="30" height="32" rx="8"/>
-    <path class="chassis-shade" d="M35 16v16a8 8 0 0 1-8 8h-4V8h4a8 8 0 0 1 8 8Z"/>
-    <rect class="screen" x="9" y="12" width="22" height="13" rx="4"/>
+
+    <!-- carcaça: o cubo de quinas arredondadas. A carcaça é o matiz. -->
+    <rect class="chassis" x="4" y="7" width="38" height="34" rx="7.5"/>
+    <path class="chassis-shade" d="M42 14.5v19a7.5 7.5 0 0 1-7.5 7.5H30V7h4.5A7.5 7.5 0 0 1 42 14.5Z"/>
+    <path class="panel" d="M30 7v34" opacity=".5"/>
+    <path class="vent" d="M33 11h6M33 13.5h6M33 16h6"/>
+    <g class="screws">
+      <circle cx="7.6" cy="10.6" r="1"/><circle cx="26.4" cy="10.6" r="1"/>
+      <circle cx="7.6" cy="37.4" r="1"/><circle cx="26.4" cy="37.4" r="1"/>
+    </g>
+
+    <!-- tela-rosto: domina a face, com moldura funda e brilho da cor do agente -->
+    <rect class="bezel" x="6.5" y="9.5" width="21" height="21" rx="4.5"/>
+    <rect class="screen" x="8.5" y="11.5" width="17" height="17" rx="3"/>
     <g class="face">
-      <g class="m m-idle"><circle class="eye" cx="16" cy="18.5" r="2.1"/><circle class="eye" cx="24" cy="18.5" r="2.1"/></g>
-      <g class="m m-work"><path class="eye-line" d="M13.6 18.5h4.8M21.6 18.5h4.8"/></g>
-      <g class="m m-error"><path class="eye-x" d="M14 16.5l4 4M18 16.5l-4 4M22 16.5l4 4M26 16.5l-4 4"/></g>
+      <g class="m m-idle">
+        <ellipse class="eye" cx="13.6" cy="18" rx="2.1" ry="2.3"/>
+        <ellipse class="eye" cx="20.4" cy="18" rx="2.1" ry="2.3"/>
+        <path class="mouth" d="M15.4 23.4h3.2"/>
+      </g>
+      <g class="m m-work">
+        <path class="eye-line" d="M11.6 18h4M18.4 18h4"/>
+        <path class="mouth" d="M15.4 23.4h3.2"/>
+      </g>
+      <g class="m m-error">
+        <path class="eye-x" d="M11.8 16.2l3.4 3.4M15.2 16.2l-3.4 3.4M18.8 16.2l3.4 3.4M22.2 16.2l-3.4 3.4"/>
+      </g>
     </g>
+
+    <!-- plaqueta gravada na carcaça, abaixo da tela: SUBAGENT 01 nas fotos -->
+    <rect class="badge" x="6.5" y="32.5" width="21" height="6" rx="1.5"/>
+    <path class="badge-etch" d="M9 35.5h5M15.5 35.5h9" opacity=".55"/>
   </g>
 </svg>`;
 
@@ -262,7 +364,7 @@ function mountAgent(agent, instant, cmd) {
   node.style.zIndex = String(10 + nodes.size);
   $agents.appendChild(node);
 
-  const rec = { root: node, tool: node.querySelector('.agent-tool'), bubbleTimer: 0, walkTimer: 0 };
+  const rec = { root: node, tool: node.querySelector('.agent-tool'), bubbleTimer: 0, chain: Promise.resolve() };
   nodes.set(agent.id, rec);
 
   // O ponto de entrada vem no comando: o `moveTo` da cena já mexeu em agent.x,
@@ -273,24 +375,42 @@ function mountAgent(agent, instant, cmd) {
   return rec;
 }
 
-function walkAgent(id, x, y, face, elevator, instant) {
+function walkAgent(id, x, y, face, elevator, instant, leg) {
   const rec = nodes.get(id);
   if (!rec) return;
-  rec.root.dataset.face = String(face);
 
   // Na reconstrução o agente já está parado no destino: nada de caminhada.
-  if (instant) { animate(rec.root, { x, y }, { duration: 0 }); return; }
+  if (instant) {
+    rec.root.dataset.face = String(face);
+    rec.chain = Promise.resolve();
+    animate(rec.root, { x, y }, { duration: 0 });
+    return;
+  }
 
-  rec.root.classList.add('walking');
-  // A descida/subida de elevador até a estação (issue #9) é uma viagem rápida,
-  // não uma caminhada realista: um trajeto curto de ~300 ms. O trajeto normal
-  // usa o spring, que preserva velocidade quando interrompido, então mudar de
-  // destino no meio do caminho não dá solavanco.
-  let opts = WALK;
-  if (elevator) opts = STILL ? { duration: 0 } : { duration: 0.3, ease: 'easeInOut' };
-  const anim = animate(rec.root, { x, y }, opts);
-  clearTimeout(rec.walkTimer);
-  anim.finished.then(() => rec.root.classList.remove('walking')).catch(() => {});
+  // A viagem de elevador vem em três pernas (entrar na cabine, descer, sair):
+  // elas têm de acontecer uma depois da outra, senão a motion troca o destino
+  // no meio e o robô atravessa a parede em diagonal — que era o que acontecia
+  // antes de o poço existir.
+  const step = () => {
+    rec.root.dataset.face = String(face);
+    rec.root.classList.toggle('riding', leg === 'ride');
+    if (leg !== 'ride') rec.root.classList.add('walking');
+    // O spring da motion preserva velocidade quando interrompido, então mudar
+    // de destino no meio do caminho não dá solavanco. A descida na cabine é
+    // outra coisa: tempo fixo, igual ao da cabine, para os dois irem juntos.
+    const opts = leg === 'ride' ? (STILL ? { duration: 0 } : RIDE) : WALK;
+    const anim = animate(rec.root, { x, y }, opts);
+    return anim.finished
+      .then(() => { rec.root.classList.remove('walking', 'riding'); })
+      .catch(() => {});
+  };
+
+  if (!leg) {
+    rec.chain = Promise.resolve();
+    step();
+    return;
+  }
+  rec.chain = (rec.chain || Promise.resolve()).then(step);
 }
 
 function stateAgent(agent) {
@@ -473,7 +593,8 @@ function run(cmds) {
         mountAgent(c.agent, c.instant, c);
         touchedCast = true;
         break;
-      case 'agent-move': walkAgent(c.id, c.x, c.y, c.face, c.elevator, c.instant); break;
+      case 'agent-move': walkAgent(c.id, c.x, c.y, c.face, c.elevator, c.instant, c.leg); break;
+      case 'cabin': moveCabin(c.instant ? c.to : c.to); break;
       case 'agent-state': stateAgent(c.agent); touchedCast = true; break;
       case 'agent-leave': leaveAgent(c.id, c.instant); touchedCast = true; break;
       case 'say': sayAgent(c.id, c.text, c.tone, c.instant); break;
@@ -635,6 +756,25 @@ function syncBuilding() {
   renderFloors();
   fit();
 }
+
+// Trilhos recolhíveis: o registro e o elenco viram lombada, e a planta fica com
+// o espaço. A escolha fica no localStorage — quem trabalha com o registro
+// fechado não quer reabri-lo a cada recarga.
+function railSetup(name, btn) {
+  const key = 'office.rail.' + name;
+  const set = (off) => {
+    $app.dataset[name] = off ? 'off' : 'on';
+    btn.title = (off ? 'abrir' : 'recolher') + (name === 'feed' ? ' o registro' : ' o elenco');
+    try { localStorage.setItem(key, off ? 'off' : 'on'); } catch {}
+    fit(false);
+  };
+  let stored = null;
+  try { stored = localStorage.getItem(key); } catch {}
+  set(stored === 'off');
+  btn.addEventListener('click', () => set($app.dataset[name] !== 'off'));
+}
+railSetup('roster', el('rosterToggle'));
+railSetup('feed', el('feedToggle'));
 
 $viewBack.addEventListener('click', () => setView({ mode: 'stack' }));
 addEventListener('keydown', (e) => {

@@ -31,8 +31,14 @@ export const STATIONS = {
 // coluna = slot % 5. O andar 0 nunca muda de geometria, então o cômodo do
 // principal (MAIN_ROOM) tem endereço constante a sessão inteira.
 export const ROOMS_PER_FLOOR = 5;
+
+// Poço do elevador: uma coluna própria na direita da planta, atravessando
+// todos os andares até o térreo. Não é cômodo e não conta agente — é o
+// caminho por onde o robô desce até uma estação e volta (issue #9).
+export const SHAFT = { w: 76, x: PLAN.w - 76 };
+export const shaftCenter = () => SHAFT.x + SHAFT.w / 2;
 export const FLOOR = { top: 40, bottom: GROUND.y - 14 };  // andar 0: y=40 a y=456
-const ROOM_W = PLAN.w / ROOMS_PER_FLOOR;                  // 200
+const ROOM_W = SHAFT.x / ROOMS_PER_FLOOR;                 // a coluna do poço sai da conta
 const FLOOR_H = FLOOR.bottom - FLOOR.top;                 // 416
 const SLAB = 14;                                          // laje entre andares
 const FLOOR_PITCH = FLOOR_H + SLAB;                       // quanto cada andar sobe
@@ -86,6 +92,25 @@ export function floorCount(scene) {
   return max + 1;
 }
 
+/** O poço inteiro, do teto do último andar até a laje do térreo. */
+export function shaftRect(scene) {
+  const top = floorRect(floorCount(scene) - 1);
+  return { x: SHAFT.x, y: top.y, w: SHAFT.w, h: GROUND.y - top.y };
+}
+
+/** A cabine parada num andar. O térreo é o andar -1: o fundo do poço. */
+export function cabinRect(floor) {
+  const h = 74;
+  const y = floor < 0 ? GROUND.y - h - 4 : roomRect(floor * ROOMS_PER_FLOOR).y + 30;
+  return { x: SHAFT.x + 8, y, w: SHAFT.w - 16, h };
+}
+
+/** Onde o robô fica em pé dentro da cabine, no andar dado. */
+export function cabinStand(floor) {
+  const c = cabinRect(floor);
+  return { x: c.x + c.w / 2, y: c.y + c.h - 14 };
+}
+
 /** Onde o robô fica parado no cômodo: centro, junto à base (perto do elevador). */
 function roomHome(slot) {
   const r = roomRect(slot);
@@ -131,6 +156,7 @@ export function createScene() {
     agents: new Map(),
     props: new Map(),
     doorAgent: null,   // quem convocou por último: a porta de onde o próximo filho sai
+    cabinFloor: -1,    // onde a cabine do elevador está parada; -1 é o térreo
   };
 }
 
@@ -273,6 +299,26 @@ function moveTo(scene, a, x, y, cmds, extra) {
   cmds.push({ op: 'agent-move', id: a.id, x, y, face: a.face, ...extra });
 }
 
+/**
+ * Viagem de elevador entre o cômodo e o térreo. Duas pernas: o robô entra na
+ * cabine do próprio andar e a cabine desce (ou sobe) até o destino. O
+ * renderizador encadeia as duas — é isso que faz o elevador ser visível em vez
+ * de o robô cortar caminho na diagonal.
+ */
+function elevatorTo(scene, a, x, y, cmds) {
+  const floor = Math.floor(a.room / ROOMS_PER_FLOOR);
+  const goingDown = y >= GROUND.y;
+  const board = cabinStand(goingDown ? floor : -1);
+  const land = cabinStand(goingDown ? -1 : floor);
+
+  moveTo(scene, a, board.x, board.y, cmds, { leg: 'board' });
+  scene.cabinFloor = goingDown ? floor : -1;
+  cmds.push({ op: 'cabin', from: scene.cabinFloor, to: goingDown ? -1 : floor });
+  scene.cabinFloor = goingDown ? -1 : floor;
+  moveTo(scene, a, land.x, land.y, cmds, { leg: 'ride', elevator: true });
+  moveTo(scene, a, x, y, cmds, { leg: 'off' });
+}
+
 // Volta o agente ao próprio cômodo, ocioso. De elevador se estava lá embaixo
 // numa estação (issue #9).
 function returnHome(scene, a, cmds, status = 'idle') {
@@ -283,7 +329,8 @@ function returnHome(scene, a, cmds, status = 'idle') {
   a.away = false;
   a.since = Date.now();
   const home = roomHome(a.room);
-  moveTo(scene, a, home.x, home.y, cmds, wasAway ? { elevator: true } : undefined);
+  if (wasAway) elevatorTo(scene, a, home.x, home.y, cmds);
+  else moveTo(scene, a, home.x, home.y, cmds);
   cmds.push({ op: 'agent-state', agent: a });
 }
 
@@ -345,7 +392,7 @@ export function apply(scene, ev) {
         const rank = [...scene.agents.values()].filter((o) => o !== a && o.away && o.propKey === p.key).length;
         const spot = stationStand(p, rank);
         a.away = true;
-        moveTo(scene, a, spot.x, spot.y, cmds, { elevator: true });
+        elevatorTo(scene, a, spot.x, spot.y, cmds);
       } else {
         a.away = false;
         const spot = standAt(p, a.room);
@@ -417,6 +464,7 @@ export function rebuild(scene, events) {
   scene.agents.clear();
   scene.props.clear();
   scene.doorAgent = null;
+  scene.cabinFloor = -1;
   const cmds = [];
   for (const ev of events || []) {
     for (const c of apply(scene, ev)) cmds.push({ ...c, instant: true });

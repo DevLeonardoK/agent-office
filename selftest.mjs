@@ -11,6 +11,7 @@
 import {
   createScene, apply, rebuild, roomRect, ROOMS_PER_FLOOR, GROUND,
   DOOR, STATIONS, MAIN_ROOM, floorCount, floorRect, buildingRect, PLAN,
+  SHAFT, shaftRect, cabinRect, cabinStand,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { appendEvent, logPathFor } from './logstore.mjs';
@@ -572,6 +573,41 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('os andares não se sobrepõem', floorRect(1).y + floorRect(1).h <= floorRect(0).y);
   ok('todo robô cabe no enquadramento do prédio',
      [...s.agents.values()].every((a) => a.y >= b2.y && a.y <= b2.y + b2.h));
+}
+
+// ── o poço do elevador e a viagem em três pernas ───────────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
+
+  // O poço é uma coluna própria: nenhum cômodo invade a faixa dele.
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
+    const r = roomRect(i);
+    ok(`o cômodo ${i} não invade o poço`, r.x + r.w <= SHAFT.x);
+  }
+  const sh = shaftRect(s);
+  ok('o poço vai do último andar até a laje do térreo', sh.y <= roomRect(0).y && sh.y + sh.h === GROUND.y);
+  ok('a cabine cabe dentro do poço', cabinRect(0).x >= sh.x && cabinRect(0).x + cabinRect(0).w <= sh.x + sh.w);
+  ok('a cabine do térreo fica abaixo da do 1º andar', cabinRect(-1).y > cabinRect(0).y);
+  ok('a cabine nasce no térreo', s.cabinFloor === -1);
+
+  // Usar uma estação vira uma viagem: entrar na cabine, descer, sair.
+  const c = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }));
+  const legs = cmdsOf(c, 'agent-move').map((m) => m.leg);
+  ok('a ida é em três pernas pelo poço', legs.join(',') === 'board,ride,off', legs.join(','));
+  const board = cmdsOf(c, 'agent-move')[0];
+  ok('a primeira perna entra na cabine do próprio andar',
+     Math.abs(board.x - cabinStand(0).x) < 1 && Math.abs(board.y - cabinStand(0).y) < 1);
+  ok('a cabine é chamada na viagem', cmdsOf(c, 'cabin').length === 1);
+  ok('a cabine desce ao térreo', s.cabinFloor === -1 && cmdsOf(c, 'cabin')[0].to === -1);
+  ok('o robô termina na estação', Math.abs(s.agents.get('a1').x - STATIONS.terminal.x) < 60);
+  { const v = invariantsHold(s); ok('invariantes valem depois da descida', v.ok, v.detail); }
+
+  // E a volta sobe de novo, pelas mesmas três pernas.
+  const back = apply(s, evt({ kind: 'tool_end', agentId: 'a1', agentType: 'Explore', tool: 'Bash' }));
+  ok('a volta também é em três pernas', cmdsOf(back, 'agent-move').map((m) => m.leg).join(',') === 'board,ride,off');
+  ok('a cabine sobe ao andar do robô', s.cabinFloor === 0);
+  ok('o robô volta ao próprio cômodo', insideRoom(s.agents.get('a1').x, s.agents.get('a1').y, s.agents.get('a1').room));
 }
 
 // ── o renderizador ao menos analisa ───────────────────────────────────────

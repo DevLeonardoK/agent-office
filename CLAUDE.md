@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `motion.dev` está vendorizada em
 `public/vendor/motion.js` como bundle fechado.
 
 ```
-node selftest.mjs        # 125 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 143 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -72,6 +72,21 @@ Três lugares, nesta ordem:
 3. `public/office.js` → `SYMBOL`, o desenho em símbolo de planta, e `VERB`, o
    verbo em português que aparece no registro.
 
+## A projeção e o elevador
+
+O prédio é desenhado em **projeção oblíqua**: a face de frente fica no plano da
+cena — é nela que robôs e móveis vivem, com as coordenadas cruas do
+`scene.mjs` — e o volume vem de duas faces auxiliares (topo e lateral)
+deslocadas pelo vetor `DEPTH` do `office.js`. Nada que o `scene.mjs` posiciona
+passa pela projeção; só a arquitetura ganha corpo. Por isso o `selftest`
+continua valendo: ele afirma sobre o plano da frente.
+
+O **poço do elevador** é uma coluna própria à direita (`SHAFT`), fora da conta
+dos cômodos — `ROOM_W` deriva de `SHAFT.x`, não da largura da planta. A viagem
+até uma estação sai em três pernas (`leg: board | ride | off`), e o
+renderizador as encadeia por promessa: sem o encadeamento a motion troca o
+destino no meio e o robô volta a cortar caminho na diagonal.
+
 ## Invariantes do desenho
 
 *Desenho frio, gente quente.* O prédio inteiro é azul de prancheta
@@ -84,6 +99,10 @@ invariante do creme foi revogada — veja `docs/adr/0002`.)
 Anotação é mono, título é sans. Móvel é símbolo de planta, nunca emoji — o robô
 é a única figura desenhada da tela, e é vetorial: matiz por variável CSS, nada
 de sprite pré-renderizado por cor.
+
+O robô segue as fotos de `media-agents/`: cubo de quinas arredondadas, tela
+dominante com olhos redondos e boca de traço, alça no topo, parafusos, plaqueta
+gravada e esteiras com roldanas. Ao mudar o desenho, olhe as fotos antes.
 
 O vocabulário está em `CONTEXT.md`. Cômodo é do agente, estação é do prédio, e
 "boneco" não existe mais — é robô.

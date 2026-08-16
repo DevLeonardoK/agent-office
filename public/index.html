@@ -69,7 +69,10 @@ html, body {
 #app {
   height: 100%;
   display: grid;
+  /* Trilho recolhido vira uma faixa fina: a planta come o espaço que sobra,
+     em vez de ficar espremida entre elenco e registro. */
   grid-template-columns: var(--rail-l) minmax(0, 1fr) var(--rail-r);
+  transition: grid-template-columns .28s ease;
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
     "bar    bar   bar"
@@ -155,6 +158,45 @@ select:focus-visible, input:focus-visible {
 
 #roster { grid-area: roster; border-right: 1px solid var(--rule); }
 #feed   { grid-area: feed;   border-left:  1px solid var(--rule); }
+
+#app[data-roster="off"] { --rail-l: 34px; }
+#app[data-feed="off"]   { --rail-r: 34px; }
+
+/* Recolhido, sobra a lombada: o título de pé e o botão de reabrir. */
+#app[data-roster="off"] #roster .rail-body,
+#app[data-feed="off"]   #feed   .rail-body { display: none; }
+#app[data-roster="off"] #roster .rail-head,
+#app[data-feed="off"]   #feed   .rail-head {
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 4px;
+  border-bottom: none;
+}
+#app[data-roster="off"] #roster .rail-head > .tag,
+#app[data-feed="off"]   #feed   .rail-head > .tag {
+  writing-mode: vertical-rl;
+  letter-spacing: .18em;
+}
+#app[data-roster="off"] #roster .rail-head-end,
+#app[data-feed="off"]   #feed   .rail-head-end { flex-direction: column-reverse; }
+#app[data-roster="off"] #rosterToggle,
+#app[data-feed="off"]   #feedToggle { transform: rotate(180deg); }
+
+.rail-head-end { display: flex; align-items: center; gap: 6px; }
+
+.rail-toggle {
+  width: 18px; height: 18px;
+  display: grid; place-items: center;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  color: var(--faint);
+  font: 12px/1 var(--mono);
+  cursor: pointer;
+}
+.rail-toggle:hover { color: var(--text); border-color: var(--draft); }
 
 .rail-head {
   display: flex; align-items: baseline; justify-content: space-between;
@@ -404,26 +446,40 @@ select:focus-visible, input:focus-visible {
   will-change: transform;
 }
 
-.agent .figure { position: absolute; left: -20px; top: -46px; width: 40px; height: 52px; }
+.agent .figure { position: absolute; left: -29px; top: -64px; width: 58px; height: 71px; }
 .agent .figure svg { display: block; overflow: visible; }
 
-.agent .flip { transform-origin: 20px 46px; transition: transform .18s ease; }
+.agent .flip { transform-origin: 23px 50px; transition: transform .18s ease; }
+.agent .figure svg { width: 58px; height: 71px; }
 .agent[data-face="-1"] .flip { transform: scaleX(-1); }
 
-/* a carcaça é o matiz */
-.agent .chassis       { fill: hsl(var(--h) 70% 56%); stroke: hsl(var(--h) 62% 40%); stroke-width: 1.2; }
-.agent .chassis-shade { fill: hsl(var(--h) 62% 30%); }
-.agent .antenna       { stroke: hsl(var(--h) 62% 44%); stroke-width: 1.8; stroke-linecap: round; }
-.agent .beacon        { fill: hsl(var(--h) 80% 66%); }
-.agent .tread         { fill: hsl(var(--h) 30% 22%); stroke: hsl(var(--h) 40% 34%); stroke-width: 1; }
-.agent .tread-notch   { stroke: hsl(var(--h) 40% 40%); stroke-width: 1.1; opacity: .7; }
-.agent .screen        { fill: #081019; stroke: hsl(var(--h) 50% 30%); stroke-width: 1; }
-.agent .drop          { fill: #000; opacity: .42; }
+/* a carcaça é o matiz: metal pintado, com a face de trás mais escura */
+.agent .chassis       { fill: hsl(var(--h) 62% 52%); stroke: hsl(var(--h) 55% 32%); stroke-width: 1.2; }
+.agent .chassis-shade { fill: hsl(var(--h) 55% 30%); }
+.agent .panel         { stroke: hsl(var(--h) 45% 26%); stroke-width: .9; fill: none; }
+.agent .vent          { stroke: hsl(var(--h) 45% 30%); stroke-width: 1; opacity: .8; }
+.agent .screws circle { fill: hsl(var(--h) 40% 26%); }
+.agent .handle        { stroke: hsl(var(--h) 55% 40%); stroke-width: 2.4; fill: none; stroke-linecap: round; }
 
-/* a tela-rosto: olhos claros contra o vidro escuro */
-.agent .eye     { fill: hsl(var(--h) 90% 78%); }
-.agent .eye-line, .agent .eye-x { stroke: hsl(var(--h) 90% 78%); stroke-width: 2.1; stroke-linecap: round; fill: none; }
-.agent .eye-x   { stroke: #ff6b6b; }
+/* plaqueta gravada na carcaça, como o SUBAGENT 01 das fotos de referência */
+.agent .badge      { fill: hsl(var(--h) 30% 26%); stroke: hsl(var(--h) 40% 36%); stroke-width: .7; }
+.agent .badge-etch { stroke: hsl(var(--h) 60% 72%); stroke-width: 1.2; stroke-linecap: round; }
+
+/* esteiras: correia escura, dentes e as quatro roldanas */
+.agent .belt        { fill: hsl(215 18% 13%); stroke: hsl(215 14% 26%); stroke-width: 1; }
+.agent .tread-teeth { stroke: hsl(215 12% 30%); stroke-width: 1.1; opacity: .8; }
+.agent .roller      { fill: hsl(215 14% 22%); stroke: hsl(215 12% 34%); stroke-width: .9; }
+.agent .axle        { stroke: hsl(var(--h) 45% 34%); stroke-width: 3; stroke-linecap: round; }
+.agent .drop        { fill: #000; opacity: .42; }
+
+/* a tela-rosto domina a face: vidro fundo, moldura, e o brilho do matiz */
+.agent .bezel  { fill: hsl(var(--h) 50% 24%); stroke: hsl(var(--h) 45% 20%); stroke-width: 1; }
+.agent .screen { fill: #060c14; stroke: hsl(var(--h) 40% 18%); stroke-width: 1; }
+
+.agent .eye    { fill: hsl(var(--h) 92% 76%); }
+.agent .mouth  { stroke: hsl(var(--h) 92% 76%); stroke-width: 1.8; stroke-linecap: round; fill: none; }
+.agent .eye-line, .agent .eye-x { stroke: hsl(var(--h) 92% 76%); stroke-width: 2.1; stroke-linecap: round; fill: none; }
+.agent .eye-x  { stroke: #ff6b6b; }
 
 /* três estados de rosto; só um aparece por vez */
 .agent .m { display: none; }
@@ -434,19 +490,23 @@ select:focus-visible, input:focus-visible {
 /* olhar na direção do móvel: trabalhando, os olhos deslizam para a frente.
    Não é animação cíclica — assenta num estado fixo, íntegro no print. */
 .agent .face { transition: transform .2s ease; }
-.agent.working .face { transform: translateX(2px); }
+.agent.working .face { transform: translateX(1.6px); }
+
+/* a tela acesa é o único brilho do robô, e só enquanto ele trabalha */
+.agent.working .screen { fill: hsl(var(--h) 45% 12%); }
 
 /* o principal carrega o arco-íris na carcaça, não uma matiz */
 .agent[data-main] .chassis { fill: url(#agentRainbow); stroke: hsl(0 0% 100% / .35); }
 .agent[data-main] .chassis-shade { fill: #000; opacity: .16; }
-.agent[data-main] .beacon  { fill: #fff; }
 .agent[data-main] .eye     { fill: #fff; }
+.agent[data-main] .mouth   { stroke: #fff; }
 .agent[data-main] .eye-line { stroke: #fff; }
+.agent[data-main] .badge-etch { stroke: #fff; }
 
 /* plaqueta de identificação, na carcaça: o agent_type, legível de longe */
 .agent .plate {
   position: absolute;
-  left: 6px; top: 27px; width: 28px; height: 10px;
+  left: 4px; top: 73px; width: 50px; height: 11px;
   display: flex; align-items: center; justify-content: center;
   background: #0a1420;
   border: 1px solid hsl(var(--h) 45% 42%);
@@ -472,7 +532,7 @@ select:focus-visible, input:focus-visible {
 
 .agent-name {
   position: absolute;
-  left: -60px; top: 12px;
+  left: -60px; top: 30px;
   width: 120px;
   text-align: center;
   font: 500 var(--t-micro)/1.2 var(--mono);
@@ -490,9 +550,11 @@ select:focus-visible, input:focus-visible {
 }
 
 /* Nenhuma animação cíclica no robô: esteira é desenho, não movimento. A única
-   motricidade é o deslocamento x/y, que passa pela motion.dev. O farol acende
-   como estado fixo enquanto o robô trabalha — nada que congele torto no print. */
-.agent:not(.working) .beacon { opacity: .5; }
+   motricidade é o deslocamento x/y, que passa pela motion.dev — nada que
+   congele torto no print. */
+
+/* dentro da cabine o robô não "caminha": ele é levado */
+.agent.riding .flip { transform: none; }
 
 /* ── fala ───────────────────────────────────────────────────────────── */
 
@@ -604,7 +666,10 @@ select:focus-visible, input:focus-visible {
   <aside id="roster">
     <div class="rail-head">
       <span class="tag">no prédio</span>
-      <span class="tag" id="castCount">0</span>
+      <span class="rail-head-end">
+        <span class="tag" id="castCount">0</span>
+        <button type="button" class="rail-toggle" id="rosterToggle" title="recolher o elenco">‹</button>
+      </span>
     </div>
     <div class="rail-body" id="castList"></div>
   </aside>
@@ -629,7 +694,10 @@ select:focus-visible, input:focus-visible {
   <aside id="feed">
     <div class="rail-head">
       <span class="tag">registro</span>
-      <span class="tag" id="logCount"></span>
+      <span class="rail-head-end">
+        <span class="tag" id="logCount"></span>
+        <button type="button" class="rail-toggle" id="feedToggle" title="recolher o registro">›</button>
+      </span>
     </div>
     <div class="rail-body" id="logList"></div>
   </aside>
