@@ -15,6 +15,7 @@ import {
 import { shape } from './shape.mjs';
 import { appendEvent, logPathFor } from './logstore.mjs';
 import { SESSION_TTL, openSession, isDead, liveSessions } from './sessions.mjs';
+import { buildSettings, HTTP_EVENTS } from './install-hooks.mjs';
 import { writeFileSync, unlinkSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -454,6 +455,44 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const later = NOW + 1000 + SESSION_TTL + 1;
   ok('silêncio de 30 min mata a sessão', isDead(s2, later));
   ok('a morta por silêncio sai da lista', liveSessions(store, later).length === 0);
+}
+
+// ── os hooks no settings.json ─────────────────────────────────────────────
+{
+  const s = buildSettings({}, { repoDir: '/repo' });
+  const h = s.hooks;
+
+  // Todo evento que a cena consome vira um hook http apontando para /hook.
+  const httpOk = HTTP_EVENTS.every((e) => {
+    const groups = h[e] || [];
+    return groups.some((g) => g.hooks.some((x) => x.type === 'http' && x.url.endsWith('/hook')));
+  });
+  ok('todo evento da cena vira hook http', httpOk);
+  ok('SubagentStart e SubagentStop estão cobertos',
+     HTTP_EVENTS.includes('SubagentStart') && HTTP_EVENTS.includes('SubagentStop'));
+
+  // Só PreToolUse/PostToolUse peneiram por matcher; os demais não.
+  ok('PreToolUse tem matcher', (h.PreToolUse || []).some((g) => g.matcher === '*'));
+  ok('UserPromptSubmit não tem matcher', (h.UserPromptSubmit || []).every((g) => g.matcher === undefined));
+
+  // SessionStart é command (sobe o servidor), não http.
+  const start = (h.SessionStart || [])[0]?.hooks?.[0];
+  ok('SessionStart é command', start?.type === 'command');
+  ok('SessionStart chama o ensure-server', String(start?.command).includes('ensure-server.mjs'));
+
+  // Idempotente: reinstalar não duplica nem clona o que já existe.
+  const twice = buildSettings(s, { repoDir: '/repo' });
+  ok('reinstalar é idempotente', JSON.stringify(twice) === JSON.stringify(s));
+
+  // Não pisa em hooks de terceiros nem em outras chaves.
+  const mine = { type: 'command', command: 'meu-hook' };
+  const withOther = buildSettings(
+    { permissions: { allow: ['Bash'] }, hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [mine] }] } },
+    { repoDir: '/repo' },
+  );
+  ok('preserva outras chaves', withOther.permissions.allow[0] === 'Bash');
+  ok('preserva hook de terceiro', withOther.hooks.PreToolUse.some((g) => g.hooks.some((x) => x.command === 'meu-hook')));
+  ok('mas acrescenta o nosso', withOther.hooks.PreToolUse.some((g) => g.hooks.some((x) => x.type === 'http')));
 }
 
 // ── o renderizador ao menos analisa ───────────────────────────────────────

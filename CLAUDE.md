@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `motion.dev` está vendorizada em
 `public/vendor/motion.js` como bundle fechado.
 
 ```
-node selftest.mjs        # 29 verificações sobre scene.mjs + sintaxe do renderizador
+node selftest.mjs        # 39 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -77,7 +77,8 @@ O vocabulário está em `CONTEXT.md`. Cômodo é do agente, estação é do pré
 
 ## Hooks
 
-Vivem no `~/.claude/settings.json` global; o backup de antes está em
+Vivem no `~/.claude/settings.json` global; `node install-hooks.mjs` os escreve
+lá (idempotente) e guarda o arquivo anterior em
 `settings.json.antes-do-escritorio`. São do tipo `http` (~3,5 ms) porque o tipo
 `command` custa ~219 ms de arranque do Node em **toda** ferramenta usada. A
 exceção é o `SessionStart`, que roda um `command` para subir o servidor.
