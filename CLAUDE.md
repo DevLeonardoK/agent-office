@@ -76,7 +76,8 @@ O vocabulário está em `CONTEXT.md`. Cômodo é do agente, estação é do pré
 
 ## Hooks
 
-Vivem no `~/.claude/settings.json` global; o backup de antes está em
+Vivem no `~/.claude/settings.json` global; `node install-hooks.mjs` os escreve
+lá (idempotente) e guarda o arquivo anterior em
 `settings.json.antes-do-escritorio`. São do tipo `http` (~3,5 ms) porque o tipo
 `command` custa ~219 ms de arranque do Node em **toda** ferramenta usada. A
 exceção é o `SessionStart`, que roda um `command` para subir o servidor.
