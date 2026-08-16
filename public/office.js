@@ -11,6 +11,10 @@ import {
 
 const params = new URLSearchParams(location.search);
 
+// Carimbo do desenho carregado. Suba isto quando o desenho mudar de forma —
+// é o que distingue "não mudou" de "o navegador está com o arquivo velho".
+const BUILD = '2.5d · poço · robô-foto';
+
 // `instant` despeja o roteiro de uma vez; sem cortar as animações, o resultado
 // seria um congelado com todo mundo no meio do caminho.
 const STILL = params.has('instant') || matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -38,6 +42,7 @@ const $logCount = el('logCount');
 const $empty = el('empty');
 const $floors = el('floors');
 const $app = el('app');
+el('build').textContent = BUILD;
 const $viewBack = el('viewBack');
 
 // ── estado do cliente ─────────────────────────────────────────────────────

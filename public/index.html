@@ -290,6 +290,19 @@ select:focus-visible, input:focus-visible {
 
 /* ── palco ──────────────────────────────────────────────────────────── */
 
+/* Carimbo de versão: existe para responder "o navegador está com o desenho
+   novo?" sem abrir o inspetor. Cache velho mostra outra coisa aqui. */
+#build {
+  margin-left: auto;
+  padding: 2px 7px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  color: var(--faint);
+  font: 500 var(--t-micro)/1.3 var(--mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
 #stage {
   grid-area: stage;
   position: relative;
@@ -660,6 +673,7 @@ select:focus-visible, input:focus-visible {
       seguir a ativa
     </label>
 
+    <span id="build" title="versão do desenho carregada no navegador">—</span>
     <div id="status"><i id="dot"></i><span id="statusText">conectando</span></div>
   </header>
 
