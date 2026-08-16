@@ -1,5 +1,8 @@
 node_modules/
 
+# Log de eventos gravado em disco (arquivo morto, um .jsonl por sessão).
+logs/
+
 # Lixo do WSL ao copiar arquivos do Windows.
 *:Zone.Identifier
 

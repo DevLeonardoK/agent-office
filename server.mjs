@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { shape } from './shape.mjs';
+import { appendEvent } from './logstore.mjs';
 
 const PORT = Number(process.env.AGENT_OFFICE_PORT || 4517);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -194,7 +195,13 @@ const server = http.createServer((req, res) => {
       res.writeHead(204).end();
       try {
         const ev = shape(JSON.parse(body));
-        if (ev) broadcast({ type: 'event', event: ingest(ev) });
+        if (ev) {
+          const out = ingest(ev);
+          // Grava o log em disco antes de transmitir. Ninguém o relê — é arquivo
+          // morto, guardado para não fechar a porta de um replay futuro.
+          appendEvent(out);
+          broadcast({ type: 'event', event: out });
+        }
       } catch {
         /* payload estranho nao derruba o escritorio */
       }
