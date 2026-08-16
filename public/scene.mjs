@@ -93,6 +93,19 @@ function standAt(prop, slot) {
   };
 }
 
+// Onde o robô fica em pé no térreo para usar uma estação (issue #9). Ele desce
+// de elevador até aqui; `rank` desempata quem está na mesma estação ao mesmo
+// tempo, para dois robôs não se sobreporem sobre o mesmo símbolo.
+const STATION_STAND_Y = GROUND.y + 40;
+export function stationStand(station, rank = 0) {
+  const side = rank % 2 === 0 ? 1 : -1;
+  const spread = Math.ceil(rank / 2) * 34;
+  return {
+    x: Math.max(20, Math.min(station.x + side * spread, PLAN.w - 20)),
+    y: STATION_STAND_Y,
+  };
+}
+
 export function createScene() {
   return {
     agents: new Map(),
@@ -169,6 +182,7 @@ function ensureAgent(scene, id, type, cmds) {
       status: 'idle',
       tool: null,
       propKey: null,
+      away: false,        // fora do cômodo, descido ao térreo usando uma estação
       toolCount: 0,
       deskCursor: 0,
       since: Date.now(),
@@ -216,11 +230,11 @@ function ensureProp(scene, agent, seed, cmds) {
   return p;
 }
 
-function moveTo(scene, a, x, y, cmds) {
+function moveTo(scene, a, x, y, cmds, extra) {
   if (Math.abs(x - a.x) > 6) a.face = x > a.x ? 1 : -1;
   a.x = x;
   a.y = y;
-  cmds.push({ op: 'agent-move', id: a.id, x, y, face: a.face });
+  cmds.push({ op: 'agent-move', id: a.id, x, y, face: a.face, ...extra });
 }
 
 // ── redutor ───────────────────────────────────────────────────────────────
@@ -255,11 +269,11 @@ export function apply(scene, ev) {
       a.toolCount++;
       a.since = Date.now();
 
-      // Convocar um subagente (a porta) e usar uma estação acontecem sem tirar o
-      // robô do cômodo por ora: a linhagem é a issue #10 e a descida de elevador
-      // até a estação é a #9. Até lá o robô trabalha do próprio cômodo.
+      // Convocar um subagente (a porta) acontece no próprio cômodo por ora: a
+      // linhagem pela porta é a issue #10.
       if (seed.kind === 'door') {
         a.propKey = null;
+        a.away = false;
         const home = roomHome(a.room);
         moveTo(scene, a, home.x, home.y, cmds);
         cmds.push({ op: 'agent-state', agent: a });
@@ -271,9 +285,15 @@ export function apply(scene, ev) {
       a.propKey = p.key;
 
       if (p.fixed) {
-        const home = roomHome(a.room);
-        moveTo(scene, a, home.x, home.y, cmds);
+        // Estação: recurso singular no térreo. O robô desce de elevador até lá,
+        // usa a estação, e o cômodo dele fica "ocupado, fora" enquanto isso
+        // (issue #9). `rank` afasta quem divide a mesma estação.
+        const rank = [...scene.agents.values()].filter((o) => o !== a && o.away && o.propKey === p.key).length;
+        const spot = stationStand(p, rank);
+        a.away = true;
+        moveTo(scene, a, spot.x, spot.y, cmds, { elevator: true });
       } else {
+        a.away = false;
         const spot = standAt(p, a.room);
         moveTo(scene, a, spot.x, spot.y, cmds);
       }
@@ -284,12 +304,15 @@ export function apply(scene, ev) {
     }
 
     case 'tool_end': {
+      const wasAway = a.away;
       a.status = 'idle';
       a.tool = null;
       a.propKey = null;
+      a.away = false;
       a.since = Date.now();
       const home = roomHome(a.room);
-      moveTo(scene, a, home.x, home.y, cmds);
+      // Volta de elevador se estava lá embaixo numa estação (issue #9).
+      moveTo(scene, a, home.x, home.y, cmds, wasAway ? { elevator: true } : undefined);
       cmds.push({ op: 'agent-state', agent: a });
       break;
     }
@@ -318,12 +341,14 @@ export function apply(scene, ev) {
       break;
 
     case 'turn_end': {
+      const wasAway = a.away;
       a.status = 'idle';
       a.tool = null;
       a.propKey = null;
+      a.away = false;
       a.since = Date.now();
       const home = roomHome(a.room);
-      moveTo(scene, a, home.x, home.y, cmds);
+      moveTo(scene, a, home.x, home.y, cmds, wasAway ? { elevator: true } : undefined);
       cmds.push({ op: 'agent-state', agent: a });
       if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'result' });
       break;
@@ -363,7 +388,14 @@ export function hydrate(scene, room) {
     if (raw.prop && seedByKey.has(raw.prop)) {
       const p = ensureProp(scene, a, seedByKey.get(raw.prop), cmds);
       a.propKey = p.key;
-      spot = p.fixed ? roomHome(a.room) : standAt(p, a.room);
+      if (p.fixed) {
+        // Estava numa estação: renasce no térreo, com o cômodo "ocupado, fora".
+        const rank = [...scene.agents.values()].filter((o) => o !== a && o.away && o.propKey === p.key).length;
+        a.away = true;
+        spot = stationStand(p, rank);
+      } else {
+        spot = standAt(p, a.room);
+      }
     }
     a.x = spot.x;
     a.y = spot.y;

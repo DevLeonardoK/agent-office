@@ -283,6 +283,24 @@ select:focus-visible, input:focus-visible {
 
 .door-plate[data-main] { border-color: #c9c0a8; color: #e4dcc6; }
 .door-plate[data-leaving] { opacity: .4; }
+.door-plate[data-away] { border-style: dashed; opacity: .7; }
+
+/* marca "ocupado, fora": o dono desceu ao térreo usar uma estação (issue #9) */
+.room-mark {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 2px 7px;
+  border: 1px dashed hsl(var(--h) 45% 50%);
+  border-radius: 2px;
+  font: 500 var(--t-micro)/1.2 var(--mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: hsl(var(--h) 50% 66%);
+  opacity: .62;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.room-mark[data-main] { border-color: #b5ad98; color: #cfc7b2; }
 
 /* ── móveis, como símbolo de planta ─────────────────────────────────── */
 

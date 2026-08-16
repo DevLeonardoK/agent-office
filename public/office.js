@@ -221,15 +221,18 @@ function mountAgent(agent, instant) {
   return rec;
 }
 
-function walkAgent(id, x, y, face) {
+function walkAgent(id, x, y, face, elevator) {
   const rec = nodes.get(id);
   if (!rec) return;
   rec.root.dataset.face = String(face);
   rec.root.classList.add('walking');
 
-  // O spring da motion preserva velocidade quando interrompido, então mudar de
+  // A descida/subida de elevador até a estação (issue #9) é uma viagem rápida,
+  // não uma caminhada realista: um trajeto curto de ~300 ms. O trajeto normal
+  // usa o spring, que preserva velocidade quando interrompido, então mudar de
   // destino no meio do caminho não dá solavanco.
-  const anim = animate(rec.root, { x, y }, WALK);
+  const opts = elevator ? (STILL ? { duration: 0 } : { duration: 0.3, ease: 'easeInOut' }) : WALK;
+  const anim = animate(rec.root, { x, y }, opts);
   clearTimeout(rec.walkTimer);
   anim.finished.then(() => rec.root.classList.remove('walking')).catch(() => {});
 }
@@ -327,6 +330,21 @@ function renderDoors() {
     // A plaqueta acompanha o andar do cômodo, não o topo fixo do 1º andar.
     plate.style.top = r.y + 'px';
     $doors.appendChild(plate);
+
+    // O dono desceu ao térreo para usar uma estação (issue #9): o cômodo fica
+    // reservado, com a marca "ocupado, fora", para não se confundir com um
+    // cômodo vazio.
+    if (a.away) {
+      plate.dataset.away = '';
+      const mark = document.createElement('div');
+      mark.className = 'room-mark';
+      mark.style.setProperty('--h', hueOf(a));
+      if (a.isMain) mark.dataset.main = '';
+      mark.style.left = r.cx + 'px';
+      mark.style.top = (r.y + r.h / 2) + 'px';
+      mark.textContent = 'ocupado · fora';
+      $doors.appendChild(mark);
+    }
   }
 }
 
@@ -395,7 +413,7 @@ function run(cmds) {
         mountAgent(c.agent, c.instant);
         touchedCast = true;
         break;
-      case 'agent-move': walkAgent(c.id, c.x, c.y, c.face); break;
+      case 'agent-move': walkAgent(c.id, c.x, c.y, c.face, c.elevator); break;
       case 'agent-state': stateAgent(c.agent); touchedCast = true; break;
       case 'agent-leave': leaveAgent(c.id); touchedCast = true; break;
       case 'say': sayAgent(c.id, c.text, c.tone); break;

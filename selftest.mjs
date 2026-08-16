@@ -10,7 +10,7 @@
 
 import {
   createScene, apply, hydrate, roomRect, ROOMS_PER_FLOOR, GROUND,
-  DOOR, STATIONS, MAIN_ROOM, floorCount,
+  DOOR, STATIONS, MAIN_ROOM, floorCount, PLAN,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
@@ -62,9 +62,12 @@ function violations(s) {
     for (let f = 0; f <= maxF; f++) if (!perFloor.has(f)) bad.push(`andar ${f} vazio abaixo do topo`);
   }
 
-  // Todo robô dentro do seu cômodo.
+  // Todo robô está no seu cômodo — ou no térreo, quando desce para usar uma
+  // estação (issue #9). Nunca num terceiro lugar.
   for (const a of agents) {
-    if (!insideRoom(a.x, a.y, a.room)) bad.push(`robô ${a.id} fora do cômodo ${a.room}`);
+    const atGround = a.y >= GROUND.y && a.x >= 0 && a.x <= PLAN.w;
+    const placed = a.away ? atGround : insideRoom(a.x, a.y, a.room);
+    if (!placed) bad.push(`robô ${a.id} nem no cômodo ${a.room} nem no térreo`);
   }
 
   // Nenhum robô se sobrepõe a outro.
@@ -287,6 +290,50 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('o móvel do realocado o acompanha', cmdsOf(c, 'prop-move').length >= 1 &&
      insideRoom(s.props.get(squatter.id + '|file:f' + squatter.id.slice(3) + '.ts').x, s.props.get(squatter.id + '|file:f' + squatter.id.slice(3) + '.ts').y, s.agents.get(squatter.id).room));
   { const v = invariantsHold(s); ok('invariantes valem após o principal chegar tarde', v.ok, v.detail); }
+}
+
+// ── elevador até a estação: o robô desce ao térreo e volta (issue #9) ────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
+  const room = s.agents.get('a1').room;
+
+  const c = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }));
+  const a = s.agents.get('a1');
+  ok('usar estação marca o robô como fora', a.away === true);
+  ok('o robô desce ao térreo', a.y >= GROUND.y, `y=${a.y}`);
+  ok('o robô encosta na estação do térreo', Math.abs(a.x - STATIONS.terminal.x) < 60, `x=${a.x}`);
+  ok('o cômodo do robô continua reservado', a.room === room);
+  ok('a viagem até a estação é de elevador', cmdsOf(c, 'agent-move').some((m) => m.elevator === true));
+  { const v = invariantsHold(s); ok('invariantes valem com o robô na estação', v.ok, v.detail); }
+
+  const back = apply(s, evt({ kind: 'tool_end', agentId: 'a1', agentType: 'Explore', tool: 'Bash' }));
+  const a2 = s.agents.get('a1');
+  ok('ao terminar, o robô deixa de estar fora', a2.away === false);
+  ok('o robô volta para o próprio cômodo', insideRoom(a2.x, a2.y, a2.room));
+  ok('a volta também é de elevador', cmdsOf(back, 'agent-move').some((m) => m.elevator === true));
+}
+
+// ── usar móvel (não estação) continua dentro do cômodo (issue #9) ────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
+  apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('x.ts') }));
+  const a = s.agents.get('a1');
+  ok('móvel do cômodo não manda o robô ao térreo', a.away === false && insideRoom(a.x, a.y, a.room));
+}
+
+// ── dois robôs na mesma estação não se sobrepõem (issue #9) ──────────────────
+{
+  const s = createScene();
+  const term = { kind: 'terminal', key: 'terminal', label: 'terminal' };
+  apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: term }));
+  apply(s, evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'Bash', prop: term }));
+  const a1 = s.agents.get('a1');
+  const a2 = s.agents.get('a2');
+  ok('os dois na estação, no térreo', a1.away && a2.away && a1.y >= GROUND.y && a2.y >= GROUND.y);
+  ok('os dois não se sobrepõem na estação', Math.hypot(a1.x - a2.x, a1.y - a2.y) > 24, `a1=${a1.x} a2=${a2.x}`);
+  { const v = invariantsHold(s); ok('invariantes valem com dois na estação', v.ok, v.detail); }
 }
 
 // ── entrada estranha não derruba ──────────────────────────────────────────
