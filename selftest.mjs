@@ -13,9 +13,12 @@ import {
   DOOR, STATIONS, MAIN_ROOM, floorCount, PLAN,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
-import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
+import { appendEvent, logPathFor } from './logstore.mjs';
+import { writeFileSync, unlinkSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
+import path from 'node:path';
 
 let pass = 0;
 const fails = [];
@@ -363,6 +366,58 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('shape descarta hook irrelevante', shape({ hook_event_name: 'PreCompact' }) === null);
   ok('shape aceita hook sem agente', shape({ hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: {} }).agentId === 'main');
   ok('shape traduz SubagentStart', shape({ hook_event_name: 'SubagentStart', agent_id: 'x', agent_type: 'Explore' }).kind === 'spawn');
+}
+
+// ── o log reconstrói o prédio idêntico ao vivo ────────────────────────────
+{
+  // Assinatura do prédio: só o que a cena desenha agora — posição, estado e
+  // móveis. Fora ficam os carimbos de tempo, que mudam a cada execução.
+  const building = (scene) => JSON.stringify({
+    agents: [...scene.agents.values()]
+      .sort((a, b) => (a.id < b.id ? -1 : 1))
+      .map((a) => [a.id, a.type, a.status, a.tool, a.propKey, Math.round(a.x), Math.round(a.y), a.hueIndex, a.face]),
+    props: [...scene.props.values()]
+      .sort((a, b) => (a.key < b.key ? -1 : 1))
+      .map((p) => [p.key, p.kind, Math.round(p.x), Math.round(p.y), p.room, p.uses]),
+  });
+
+  // Uma sessão como a que o simulate.mjs encena: hooks crus traduzidos em eventos.
+  const SESSION = 'sim-log';
+  const hooks = [
+    { hook_event_name: 'UserPromptSubmit', session_id: SESSION, user_input: 'Refatore a autenticação' },
+    { hook_event_name: 'PreToolUse', session_id: SESSION, tool_name: 'Read', tool_input: { file_path: '/p/auth.ts' } },
+    { hook_event_name: 'PostToolUse', session_id: SESSION, tool_name: 'Read' },
+    { hook_event_name: 'SubagentStart', session_id: SESSION, agent_id: 'ag-1', agent_type: 'Explore' },
+    { hook_event_name: 'PreToolUse', session_id: SESSION, agent_id: 'ag-1', agent_type: 'Explore', tool_name: 'Grep', tool_input: { pattern: 'auth\\(' } },
+    { hook_event_name: 'PreToolUse', session_id: SESSION, agent_id: 'ag-1', agent_type: 'Explore', tool_name: 'Bash', tool_input: { command: 'npm test' } },
+    { hook_event_name: 'PostToolUse', session_id: SESSION, agent_id: 'ag-1', agent_type: 'Explore', tool_name: 'Bash' },
+    { hook_event_name: 'SubagentStop', session_id: SESSION, agent_id: 'ag-1', agent_type: 'Explore', last_assistant_message: 'achei 4 handlers' },
+    { hook_event_name: 'PreToolUse', session_id: SESSION, tool_name: 'Edit', tool_input: { file_path: '/p/auth.ts' } },
+    { hook_event_name: 'Stop', session_id: SESSION, last_assistant_message: 'pronto' },
+  ];
+  const events = hooks.map(shape).filter(Boolean);
+
+  // Ao vivo: os eventos chegam e o prédio se ergue.
+  const live = createScene();
+  for (const ev of events) apply(live, ev);
+
+  // Em disco: cada evento vira uma linha do `.jsonl` da sessão.
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'office-log-'));
+  try {
+    for (const ev of events) appendEvent(ev, dir);
+
+    const file = logPathFor(SESSION, dir);
+    const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    ok('grava uma linha por evento', lines.length === events.length, `${lines.length} linhas para ${events.length} eventos`);
+
+    // Reaplicar o log numa cena limpa reconstrói o mesmo prédio.
+    const rebuilt = createScene();
+    for (const line of lines) apply(rebuilt, JSON.parse(line));
+    ok('replay do log reconstrói o prédio idêntico', building(rebuilt) === building(live),
+       `vivo=${building(live)}\n     log =${building(rebuilt)}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 // ── o renderizador ao menos analisa ───────────────────────────────────────
