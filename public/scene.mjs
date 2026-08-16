@@ -68,8 +68,8 @@ function corridorSpot(scene, agent) {
 function parentDoor(scene, ev) {
   const parentId = ev.parentId || scene.doorAgent;
   if (!parentId || parentId === ev.agentId) return null;
-  const p = scene.agents.get(parentId);
-  return p ? { x: p.x, y: p.y } : null;
+  const parent = scene.agents.get(parentId);
+  return parent ? { x: parent.x, y: parent.y } : null;
 }
 
 // ── agentes e móveis ──────────────────────────────────────────────────────
@@ -252,13 +252,13 @@ export function hydrate(scene, room) {
     a.toolCount = raw.toolCount || 0;
     a.propKey = raw.prop || null;
 
-    // Ao trocar de sala ninguém "chega": todo mundo já está no lugar.
+    // Ao trocar de sala ninguém "chega" pela porta: todo mundo já está no lugar.
+    // O retrato (x/y) do comando também é reescrito para esse lugar final, senão
+    // o agente montaria na porta do prédio.
     const p = a.propKey && scene.props.get(a.propKey);
     const spot = p ? station(p) : a.home;
     a.x = spot.x;
     a.y = spot.y;
-    // Ao trocar de sala ninguém "chega" pela porta: o retrato do comando é
-    // reescrito para o lugar final, senão o agente montaria na porta do prédio.
     for (const c of enters) cmds.push({ ...c, x: a.x, y: a.y, instant: true });
   }
   return cmds;
