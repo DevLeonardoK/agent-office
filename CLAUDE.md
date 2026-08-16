@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `motion.dev` está vendorizada em
 `public/vendor/motion.js` como bundle fechado.
 
 ```
-node selftest.mjs        # 39 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 125 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -41,11 +41,24 @@ parece bug de layout e não é:
 
 ```
 chrome --headless=new --screenshot=shot.png --window-size=1500,860 \
-  --virtual-time-budget=2500 "http://127.0.0.1:4517/?demo&instant&upto=17"
+  --virtual-time-budget=2500 "http://127.0.0.1:4517/?demo&instant&upto=21"
 ```
+
+O `upto=21` para o roteiro com seis agentes vivos — é onde o 2º andar existe. O
+print não clica, então a vista de andar cheio se pede pela URL: `&floor=1` abre
+o 2º andar assim que ele nascer.
 
 Antes de perseguir uma deformação vista em print, meça a geometria real com
 `getBoundingClientRect` num `--dump-dom`.
+
+## As duas vistas
+
+O corte vertical (padrão) enquadra `buildingRect(scene)`; o andar cheio
+enquadra `floorRect(n)`. Os dois são geometria pura do `scene.mjs`, com
+asserção no `selftest.mjs` — o `office.js` só converte o retângulo em
+`animate($plan, {x, y, scale})`. Mudou a altura do prédio, `syncBuilding()`
+redesenha a planta inteira e reenquadra; o andar aberto que for demolido
+devolve a vista ao corte vertical.
 
 ## Mapear uma ferramenta nova para um móvel
 

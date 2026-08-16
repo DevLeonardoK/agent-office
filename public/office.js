@@ -4,7 +4,10 @@
 // cada comando da cena vira pixel e movimento.
 
 import { animate, stagger } from './vendor/motion.js';
-import { createScene, apply, rebuild, PLAN, DOOR, STATIONS, GROUND, FLOOR, ROOMS_PER_FLOOR, roomRect } from './scene.mjs';
+import {
+  createScene, apply, rebuild, PLAN, DOOR, STATIONS, GROUND, FLOOR, ROOMS_PER_FLOOR,
+  roomRect, floorRect, buildingRect, floorCount,
+} from './scene.mjs';
 
 const params = new URLSearchParams(location.search);
 
@@ -33,6 +36,8 @@ const $castCount = el('castCount');
 const $logList = el('logList');
 const $logCount = el('logCount');
 const $empty = el('empty');
+const $floors = el('floors');
+const $viewBack = el('viewBack');
 
 // ── estado do cliente ─────────────────────────────────────────────────────
 
@@ -55,7 +60,11 @@ const moodOf = (a) => (a.status === 'working' ? 'work' : a.status === 'error' ? 
 
 // ── a planta ──────────────────────────────────────────────────────────────
 
-function drawBlueprint() {
+// Desenha a planta do prédio com `floors` andares empilhados sobre o térreo.
+// Redesenhada por inteiro quando o prédio muda de altura: é barato (algumas
+// dezenas de nós) e evita ter de sincronizar andar a andar.
+function drawBlueprint(floors) {
+  $blueprint.replaceChildren();
   const ns = 'http://www.w3.org/2000/svg';
   const add = (tag, attrs, parent = $blueprint) => {
     const n = document.createElementNS(ns, tag);
@@ -84,15 +93,17 @@ function drawBlueprint() {
   for (const [off, col] of stops) add('stop', { offset: off, 'stop-color': col }, grad);
 
   const M = 24;                       // margem do desenho
+  const top = floorRect(floors - 1).y - 16;   // teto do último andar
   const W = PLAN.w - M * 2;
-  const H = PLAN.h - M * 2;
+  const H = PLAN.h - M - top;
 
-  // parede externa: linha dupla, como em planta de verdade
-  add('rect', { x: M, y: M, width: W, height: H, fill: 'none', stroke: 'var(--draft)', 'stroke-width': 2, opacity: .55 });
-  add('rect', { x: M + 5, y: M + 5, width: W - 10, height: H - 10, fill: 'none', stroke: 'var(--draft)', 'stroke-width': .6, opacity: .3 });
+  // parede externa: linha dupla, como em planta de verdade. Sobe junto com o
+  // prédio: o topo é o teto do último andar, a base é o térreo.
+  add('rect', { x: M, y: top, width: W, height: H, fill: 'none', stroke: 'var(--draft)', 'stroke-width': 2, opacity: .55 });
+  add('rect', { x: M + 5, y: top + 5, width: W - 10, height: H - 10, fill: 'none', stroke: 'var(--draft)', 'stroke-width': .6, opacity: .3 });
 
   // marcas de canto (registro de prancheta)
-  for (const [cx, cy, sx, sy] of [[M, M, 1, 1], [PLAN.w - M, M, -1, 1], [M, PLAN.h - M, 1, -1], [PLAN.w - M, PLAN.h - M, -1, -1]]) {
+  for (const [cx, cy, sx, sy] of [[M, top, 1, 1], [PLAN.w - M, top, -1, 1], [M, PLAN.h - M, 1, -1], [PLAN.w - M, PLAN.h - M, -1, -1]]) {
     add('path', {
       d: `M${cx} ${cy + sy * 20}L${cx} ${cy}L${cx + sx * 20} ${cy}`,
       fill: 'none', stroke: 'var(--draft)', 'stroke-width': 1.6, opacity: .75,
@@ -102,17 +113,25 @@ function drawBlueprint() {
   // laje que separa o 1º andar do térreo de serviço
   line(M, GROUND.y, PLAN.w - M, GROUND.y, .5, 2);
 
-  // 1º andar: cinco cômodos, separados por divisórias, com a plaqueta da porta
+  // Um andar de cada vez, de baixo para cima: cinco cômodos separados por
+  // divisórias, o vão da porta no topo de cada um, e a laje que o sustenta.
   const roomW = PLAN.w / ROOMS_PER_FLOOR;
-  for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
-    if (i > 0) line(i * roomW, FLOOR.top, i * roomW, GROUND.y, .16, 1);
-    const r = roomRect(i);
-    // vão da porta, sugerido no topo do cômodo
-    add('rect', { x: r.cx - 20, y: FLOOR.top - 2, width: 40, height: 4, fill: 'var(--ink)' });
-    line(r.cx - 20, FLOOR.top, r.cx - 20, FLOOR.top + 14, .35, 1);
-    line(r.cx + 20, FLOOR.top, r.cx + 20, FLOOR.top + 14, .35, 1);
+  for (let f = 0; f < floors; f++) {
+    const fr = floorRect(f);
+    const ceiling = fr.y + 12;                    // topo dos cômodos deste andar
+    const base = ceiling + roomRect(0).h;         // piso deste andar
+    for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
+      if (i > 0) line(i * roomW, ceiling, i * roomW, base, .16, 1);
+      const r = roomRect(f * ROOMS_PER_FLOOR + i);
+      // vão da porta, sugerido no topo do cômodo
+      add('rect', { x: r.cx - 20, y: ceiling - 2, width: 40, height: 4, fill: 'var(--ink)' });
+      line(r.cx - 20, ceiling, r.cx - 20, ceiling + 14, .35, 1);
+      line(r.cx + 20, ceiling, r.cx + 20, ceiling + 14, .35, 1);
+    }
+    // laje entre este andar e o de baixo (o andar 0 apoia na laje do térreo)
+    if (f > 0) line(M, base + 7, PLAN.w - M, base + 7, .4, 2);
+    label(PLAN.w / 2, ceiling - 12, `${f + 1}º ANDAR`, .38);
   }
-  label(PLAN.w / 2, FLOOR.top - 12, '1º ANDAR', .38);
 
   // térreo de serviço: porta do prédio e as quatro estações
   const d = DOOR;
@@ -463,6 +482,7 @@ function run(cmds) {
   }
 
   if (touchedCast) { renderCast(); renderDoors(); }
+  syncBuilding();
   $empty.hidden = scene.agents.size > 0;
 }
 
@@ -525,13 +545,101 @@ $rooms.addEventListener('change', () => {
   switchRoom($rooms.value);
 });
 
-// ── encaixe do desenho na tela ────────────────────────────────────────────
+// ── vistas do prédio (issue #11) ──────────────────────────────────────────
 
-function fit() {
+// Duas vistas: o corte vertical (padrão), com os andares empilhados e o prédio
+// inteiro na tela, e o andar cheio, para inspecionar um andar denso. Só muda o
+// enquadramento — a planta e os robôs são os mesmos nos dois.
+const view = { mode: 'stack', floor: 0 };
+let drawnFloors = 0;
+
+// `?floor=N` abre um andar em tela cheia assim que ele existir — é o único jeito
+// de o print headless, que não clica, enquadrar a vista de andar cheio.
+let pinned = params.has('floor') ? Number(params.get('floor')) : null;
+
+const viewRect = () => (view.mode === 'floor' ? floorRect(view.floor) : buildingRect(scene));
+
+// Enquadra o retângulo da vista no palco. O `#plan` é uma caixa de 1000×620
+// centrada no palco, e a motion compõe o transform a partir de x/y/scale com
+// origem no centro dela: um ponto p da planta cai em centro + (p - c)·s + (x,y).
+// Daí a conta — levar o centro do retângulo da vista ao centro do palco.
+function fit(animated = true) {
   const r = $stage.getBoundingClientRect();
-  const scale = Math.min(r.width / PLAN.w, r.height / PLAN.h, 1.35);
-  $plan.style.transform = `scale(${scale})`;
+  const v = viewRect();
+  const pad = 28;
+  const scale = Math.min((r.width - pad * 2) / v.w, (r.height - pad * 2) / v.h, 1.35);
+  const c = { x: PLAN.w / 2, y: PLAN.h / 2 };
+  const x = -(v.x + v.w / 2 - c.x) * scale;
+  const y = -(v.y + v.h / 2 - c.y) * scale;
+  const opts = REDUCED || !animated ? { duration: 0 } : { type: 'spring', stiffness: 110, damping: 20 };
+  animate($plan, { x, y, scale }, opts);
 }
+
+function setView(next) {
+  Object.assign(view, next);
+  $stage.dataset.view = view.mode;
+  $viewBack.hidden = view.mode === 'stack';
+  renderFloors();
+  fit();
+}
+
+// As áreas de clique de cada andar. Ficam sobre a planta, invisíveis até o
+// ponteiro passar por cima; no andar cheio sobra uma só, e clicar nela volta
+// para a vista empilhada.
+function renderFloors() {
+  $floors.replaceChildren();
+  const floors = floorCount(scene);
+  for (let f = 0; f < floors; f++) {
+    if (view.mode === 'floor' && f !== view.floor) continue;
+    const fr = floorRect(f);
+    const hit = document.createElement('button');
+    hit.type = 'button';
+    hit.className = 'floor-hit';
+    hit.style.left = fr.x + 'px';
+    hit.style.top = fr.y + 'px';
+    hit.style.width = fr.w + 'px';
+    hit.style.height = fr.h + 'px';
+    const aberto = view.mode === 'floor';
+    hit.title = aberto ? 'voltar à vista empilhada' : `abrir o ${f + 1}º andar em tela cheia`;
+    hit.setAttribute('aria-label', hit.title);
+    hit.addEventListener('click', () => setView(aberto ? { mode: 'stack' } : { mode: 'floor', floor: f }));
+    $floors.appendChild(hit);
+  }
+}
+
+// Mantém a planta desenhada do tamanho do prédio. Chamada depois de cada lote
+// de comandos: é aqui que um andar novo ganha paredes e a vista se reenquadra.
+function syncBuilding() {
+  const floors = floorCount(scene);
+  // `?floor=N` só pode ser honrado quando o andar existir: no arranque o prédio
+  // ainda está vazio, e o roteiro do demo é aplicado depois.
+  if (pinned != null && view.mode === 'stack' && floors > pinned) {
+    setView({ mode: 'floor', floor: pinned });
+    pinned = null;
+    return;
+  }
+  if (view.mode === 'floor' && view.floor >= floors) {
+    setView({ mode: 'stack' });   // o andar aberto foi demolido
+    return;
+  }
+  if (floors !== drawnFloors) {
+    drawnFloors = floors;
+    drawBlueprint(floors);
+    // O SVG da planta cobre o prédio inteiro: sem esticar a caixa para cima, o
+    // viewBox cortaria os andares de cima, que vivem em y negativo.
+    const top = floorRect(floors - 1).y - 40;
+    $blueprint.style.top = top + 'px';
+    $blueprint.style.height = PLAN.h - top + 'px';
+    $blueprint.setAttribute('viewBox', `0 ${top} ${PLAN.w} ${PLAN.h - top}`);
+  }
+  renderFloors();
+  fit();
+}
+
+$viewBack.addEventListener('click', () => setView({ mode: 'stack' }));
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && view.mode === 'floor') setView({ mode: 'stack' });
+});
 
 // ── conexão ───────────────────────────────────────────────────────────────
 
@@ -612,9 +720,9 @@ function connect() {
 
 // ── arranque ──────────────────────────────────────────────────────────────
 
-drawBlueprint();
-new ResizeObserver(fit).observe($stage);
-fit();
+setView({ mode: 'stack' });
+syncBuilding();
+new ResizeObserver(() => fit(false)).observe($stage);
 
 if (params.has('demo')) {
   // Sem SSE: a cena vem de um roteiro. Serve para ver o escritório sem o

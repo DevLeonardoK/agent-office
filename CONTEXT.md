@@ -27,6 +27,16 @@ O lugar de exatamente um agente dentro de um andar, com os móveis que esse
 agente usou. Cinco por andar. É esvaziado quando muda de ocupante.
 _Avoid_: sala, baia, estação (é outra coisa), escritório
 
+**Corte vertical**:
+A vista padrão do prédio: os andares empilhados na tela, o prédio inteiro
+visível de uma vez. Cresce e encolhe com o prédio.
+_Avoid_: vista geral, zoom out, mapa
+
+**Andar cheio**:
+A vista de um andar só, enquadrado na tela inteira, com o resto do prédio sob
+um véu. Aberta ao clicar num andar; `esc` volta ao corte vertical.
+_Avoid_: tela cheia (é do navegador), foco, modal
+
 ## Quem trabalha
 
 **Robô**:

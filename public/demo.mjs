@@ -12,6 +12,8 @@ const main = { agentId: 'main', agentType: 'main' };
 const explore = { agentId: 'ag-1', agentType: 'Explore' };
 const plan = { agentId: 'ag-2', agentType: 'Plan' };
 const tdd = { agentId: 'ag-3', agentType: 'tdd' };
+const docs = { agentId: 'ag-4', agentType: 'docs' };
+const review = { agentId: 'ag-5', agentType: 'review' };
 
 /** [espera em ms antes deste evento, evento] */
 export const SCRIPT = [
@@ -31,6 +33,12 @@ export const SCRIPT = [
   [800,  { ...tdd, kind: 'spawn' }],
   [600,  { ...tdd, kind: 'tool_start', tool: 'Read', prop: file('session.ts') }],   // divide a mesa com o Explore
 
+  // O sexto agente vivo inaugura o 2º andar: é o que a vista empilhada mostra.
+  [500,  { ...docs, kind: 'spawn' }],
+  [400,  { ...review, kind: 'spawn' }],
+  [600,  { ...docs, kind: 'tool_start', tool: 'Read', prop: file('README.md') }],
+  [500,  { ...review, kind: 'tool_start', tool: 'Read', prop: file('guard.ts') }],
+
   [1400, { ...plan, kind: 'tool_end', tool: 'WebFetch' }],
   [400,  { ...plan, kind: 'tool_start', tool: 'TodoWrite', prop: { kind: 'whiteboard', key: 'whiteboard', label: 'quadro' } }],
   [1200, { ...explore, kind: 'stop', text: 'Achei 4 handlers: auth.ts, session.ts, guard.ts e o middleware legado da api v1.' }],
@@ -42,6 +50,8 @@ export const SCRIPT = [
   [900,  { ...main, kind: 'tool_end', tool: 'Bash', failed: true }],   // o rosto do robô mostra o X
   [500,  { ...main, kind: 'tool_start', tool: 'Edit', prop: file('auth.ts') }],
   [1600, { ...main, kind: 'tool_end', tool: 'Edit' }],
+  [400,  { ...docs, kind: 'stop', text: 'README atualizado.' }],
+  [300,  { ...review, kind: 'stop', text: 'Revisão sem apontamentos.' }],   // o 2º andar é demolido
   [400,  { ...tdd, kind: 'stop', text: 'Suíte verde: 34 testes, 0 falhas.' }],
   [700,  { ...main, kind: 'turn_end', text: 'Refatoração pronta e a suíte passou inteira.' }],
 ];

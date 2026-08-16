@@ -10,7 +10,7 @@
 
 import {
   createScene, apply, rebuild, roomRect, ROOMS_PER_FLOOR, GROUND,
-  DOOR, STATIONS, MAIN_ROOM, floorCount, PLAN,
+  DOOR, STATIONS, MAIN_ROOM, floorCount, floorRect, buildingRect, PLAN,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { appendEvent, logPathFor } from './logstore.mjs';
@@ -539,6 +539,39 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('preserva outras chaves', withOther.permissions.allow[0] === 'Bash');
   ok('preserva hook de terceiro', withOther.hooks.PreToolUse.some((g) => g.hooks.some((x) => x.command === 'meu-hook')));
   ok('mas acrescenta o nosso', withOther.hooks.PreToolUse.some((g) => g.hooks.some((x) => x.type === 'http')));
+}
+
+// ── enquadramento das vistas: corte vertical e andar cheio (issue #11) ─────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
+
+  // Vista empilhada com um andar: cobre o andar 0 e o térreo inteiro.
+  const b1 = buildingRect(s);
+  ok('o corte vertical cobre a largura da planta', b1.x === 0 && b1.w === PLAN.w);
+  ok('o corte vertical vai até a base do térreo', b1.y + b1.h === PLAN.h);
+  ok('o corte vertical cobre o 1º andar', b1.y <= roomRect(0).y && b1.y + b1.h >= GROUND.y + GROUND.h);
+
+  // O andar cheio enquadra os cinco cômodos daquele andar, e só eles.
+  const f0 = floorRect(0);
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
+    const r = roomRect(i);
+    ok(`o andar cheio contém o cômodo ${i}`, r.y >= f0.y && r.y + r.h <= f0.y + f0.h && r.x >= f0.x && r.x + r.w <= f0.x + f0.w);
+  }
+  ok('o andar cheio não desce ao térreo', f0.y + f0.h < GROUND.y);
+  ok('o andar cheio é mais baixo que o prédio de um andar', f0.h < b1.h);
+
+  // O sexto agente abre o 2º andar: o corte vertical cresce para cima.
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
+  const b2 = buildingRect(s);
+  ok('o prédio tem dois andares', floorCount(s) === 2);
+  ok('o corte vertical sobe com o andar novo', b2.y < b1.y && b2.h > b1.h);
+  ok('o corte vertical cobre o andar de cima', b2.y <= floorRect(1).y);
+
+  // Andares não se sobrepõem: cada um é uma faixa própria, de baixo para cima.
+  ok('os andares não se sobrepõem', floorRect(1).y + floorRect(1).h <= floorRect(0).y);
+  ok('todo robô cabe no enquadramento do prédio',
+     [...s.agents.values()].every((a) => a.y >= b2.y && a.y <= b2.y + b2.h));
 }
 
 // ── o renderizador ao menos analisa ───────────────────────────────────────

@@ -54,6 +54,29 @@ export function roomRect(slot) {
   };
 }
 
+/**
+ * Faixa vertical de um andar: os cinco cômodos daquele andar, de parede a
+ * parede. É o que a vista de andar cheio enquadra (issue #11) — o térreo, que
+ * não é andar, fica de fora.
+ */
+export function floorRect(floor) {
+  const r = roomRect(floor * ROOMS_PER_FLOOR);
+  // Menos da metade da laje: assim a faixa de um andar nunca invade a do
+  // vizinho, e clicar num andar não pode acertar o de baixo.
+  const pad = 6;
+  return { x: 0, y: r.y - pad, w: PLAN.w, h: r.h + pad * 2 };
+}
+
+/**
+ * O prédio inteiro como está agora: do topo do último andar até a base do
+ * térreo. É o enquadramento do corte vertical, a vista padrão — cresce quando
+ * um andar nasce e encolhe quando um é demolido.
+ */
+export function buildingRect(scene) {
+  const top = floorRect(floorCount(scene) - 1);
+  return { x: 0, y: top.y, w: PLAN.w, h: PLAN.h - top.y };
+}
+
 /** Quantos andares o prédio tem agora. Deriva da ocupação: andar vazio some. */
 export function floorCount(scene) {
   let max = 0;
