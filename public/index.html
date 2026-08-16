@@ -32,6 +32,13 @@
   --live:       #4ade80;
   --dead:       #46586c;
 
+  /* o arco-íris do agente principal — não é um sexto matiz, é a ausência de
+     escolha entre os cinco. Mesmo gradiente na carcaça (SVG #agentRainbow),
+     no elenco e no registro. */
+  --rainbow: linear-gradient(90deg,
+    hsl(0 80% 62%), hsl(32 85% 60%), hsl(52 85% 58%),
+    hsl(145 60% 52%), hsl(210 70% 58%), hsl(280 60% 64%));
+
   --mono: ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", monospace;
   --sans: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
 
@@ -208,10 +215,14 @@ select:focus-visible, input:focus-visible {
 
 .cast-doing b { color: var(--text-2); font-weight: 500; }
 
-/* o principal não usa matiz nenhuma: é creme, como o boneco dele */
-.cast-row[data-main] .cast-name, .log-row[data-main] .log-who { color: #e4dcc6; }
-.cast-row[data-main] .chip { border-color: #c9c0a8; }
-.cast-row[data-main][data-status="working"] .chip { background: #c9c0a8; }
+/* o principal carrega o arco-íris, não uma matiz — igual à carcaça do robô */
+.cast-row[data-main] .cast-name, .log-row[data-main] .log-who {
+  background: var(--rainbow);
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+}
+.cast-row[data-main] .chip { border-color: transparent; background: var(--rainbow); opacity: .5; }
+.cast-row[data-main][data-status="working"] .chip { opacity: 1; }
 
 /* ── registro ───────────────────────────────────────────────────────── */
 
@@ -300,37 +311,82 @@ select:focus-visible, input:focus-visible {
   will-change: transform;
 }
 
-.agent .figure { position: absolute; left: -17px; top: -46px; }
+.agent .figure { position: absolute; left: -20px; top: -46px; width: 40px; height: 52px; }
 .agent .figure svg { display: block; overflow: visible; }
 
-.agent .flip { transform-origin: 17px 46px; transition: transform .18s ease; }
+.agent .flip { transform-origin: 20px 46px; transition: transform .18s ease; }
 .agent[data-face="-1"] .flip { transform: scaleX(-1); }
 
-.agent .torso  { fill: hsl(var(--h) 74% 58%); }
-.agent .head   { fill: hsl(var(--h) 58% 80%); }
-.agent .limb   { stroke: hsl(var(--h) 62% 44%); stroke-width: 4.4; stroke-linecap: round; fill: none; }
-.agent .shade  { fill: hsl(var(--h) 62% 46%); }
-.agent .drop   { fill: #000; opacity: .42; }
+/* a carcaça é o matiz */
+.agent .chassis       { fill: hsl(var(--h) 70% 56%); stroke: hsl(var(--h) 62% 40%); stroke-width: 1.2; }
+.agent .chassis-shade { fill: hsl(var(--h) 62% 30%); }
+.agent .antenna       { stroke: hsl(var(--h) 62% 44%); stroke-width: 1.8; stroke-linecap: round; }
+.agent .beacon        { fill: hsl(var(--h) 80% 66%); }
+.agent .tread         { fill: hsl(var(--h) 30% 22%); stroke: hsl(var(--h) 40% 34%); stroke-width: 1; }
+.agent .tread-notch   { stroke: hsl(var(--h) 40% 40%); stroke-width: 1.1; opacity: .7; }
+.agent .screen        { fill: #081019; stroke: hsl(var(--h) 50% 30%); stroke-width: 1; }
+.agent .drop          { fill: #000; opacity: .42; }
 
-/* o principal é o único de outro material: claro, quase branco quente */
-.agent[data-main] .torso { fill: #f0ead9; }
-.agent[data-main] .head  { fill: #fbf7ec; }
-.agent[data-main] .limb  { stroke: #b5ad98; }
-.agent[data-main] .shade { fill: #cfc7b2; }
+/* a tela-rosto: olhos claros contra o vidro escuro */
+.agent .eye     { fill: hsl(var(--h) 90% 78%); }
+.agent .eye-line, .agent .eye-x { stroke: hsl(var(--h) 90% 78%); stroke-width: 2.1; stroke-linecap: round; fill: none; }
+.agent .eye-x   { stroke: #ff6b6b; }
+
+/* três estados de rosto; só um aparece por vez */
+.agent .m { display: none; }
+.agent[data-mood="idle"]  .m-idle  { display: block; }
+.agent[data-mood="work"]  .m-work  { display: block; }
+.agent[data-mood="error"] .m-error { display: block; }
+
+/* olhar na direção do móvel: trabalhando, os olhos deslizam para a frente.
+   Não é animação cíclica — assenta num estado fixo, íntegro no print. */
+.agent .face { transition: transform .2s ease; }
+.agent.working .face { transform: translateX(2px); }
+
+/* o principal carrega o arco-íris na carcaça, não uma matiz */
+.agent[data-main] .chassis { fill: url(#agentRainbow); stroke: hsl(0 0% 100% / .35); }
+.agent[data-main] .chassis-shade { fill: #000; opacity: .16; }
+.agent[data-main] .beacon  { fill: #fff; }
+.agent[data-main] .eye     { fill: #fff; }
+.agent[data-main] .eye-line { stroke: #fff; }
+
+/* plaqueta de identificação, na carcaça: o agent_type, legível de longe */
+.agent .plate {
+  position: absolute;
+  left: 6px; top: 27px; width: 28px; height: 10px;
+  display: flex; align-items: center; justify-content: center;
+  background: #0a1420;
+  border: 1px solid hsl(var(--h) 45% 42%);
+  border-radius: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.agent .plate-type {
+  max-width: 100%;
+  font: 600 6.5px/1 var(--mono);
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: hsl(var(--h) 65% 80%);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.agent[data-main] .plate { border-color: hsl(0 0% 100% / .5); }
+.agent[data-main] .plate-type {
+  background: var(--rainbow);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
 
 .agent-name {
   position: absolute;
-  left: -60px; top: 8px;
+  left: -60px; top: 12px;
   width: 120px;
   text-align: center;
   font: 500 var(--t-micro)/1.2 var(--mono);
   letter-spacing: .09em;
   text-transform: uppercase;
-  color: hsl(var(--h) 55% 72%);
   pointer-events: none;
 }
-
-.agent[data-main] .agent-name { color: #e4dcc6; }
 
 .agent-tool {
   display: block;
@@ -340,25 +396,10 @@ select:focus-visible, input:focus-visible {
   min-height: 10px;
 }
 
-/* passada e digitação */
-.leg, .arm { transform-box: fill-box; }
-.leg-a, .leg-b { transform-origin: 50% 0%; }
-.arm-a, .arm-b { transform-origin: 50% 0%; }
-
-.agent.walking .leg-a { animation: step .44s linear infinite; }
-.agent.walking .leg-b { animation: step .44s linear infinite -.22s; }
-.agent.walking .arm-a { animation: swing .44s linear infinite -.22s; }
-.agent.walking .arm-b { animation: swing .44s linear infinite; }
-
-@keyframes step  { 0%, 100% { transform: rotate(19deg); } 50% { transform: rotate(-19deg); } }
-@keyframes swing { 0%, 100% { transform: rotate(-13deg); } 50% { transform: rotate(13deg); } }
-
-.agent.working .arm-a { animation: tap .26s ease-in-out infinite alternate; }
-.agent.working .arm-b { animation: tap .26s ease-in-out infinite alternate -.13s; }
-@keyframes tap { from { transform: rotate(6deg); } to { transform: rotate(26deg); } }
-
-.agent .figure { animation: breathe 3.6s ease-in-out infinite; }
-@keyframes breathe { 50% { transform: translateY(-1.2px); } }
+/* Nenhuma animação cíclica no robô: esteira é desenho, não movimento. A única
+   motricidade é o deslocamento x/y, que passa pela motion.dev. O farol acende
+   como estado fixo enquanto o robô trabalha — nada que congele torto no print. */
+.agent:not(.working) .beacon { opacity: .5; }
 
 /* ── fala ───────────────────────────────────────────────────────────── */
 

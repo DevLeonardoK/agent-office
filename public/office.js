@@ -48,6 +48,10 @@ let logged = 0;
 const HUES = [38, 8, 165, 262, 328];
 const hueOf = (a) => (a.isMain ? 0 : HUES[a.hueIndex % HUES.length]);
 
+// O rosto do robô: olhos apertados trabalhando, X numa falha de ferramenta,
+// olhos abertos no resto. É o que a tela-rosto mostra.
+const moodOf = (a) => (a.status === 'working' ? 'work' : a.status === 'error' ? 'error' : 'idle');
+
 // ── a planta ──────────────────────────────────────────────────────────────
 
 function drawBlueprint() {
@@ -58,6 +62,25 @@ function drawBlueprint() {
     parent.appendChild(n);
     return n;
   };
+
+  // Gradiente arco-íris do agente principal. Vive aqui, no SVG da planta, mas a
+  // carcaça do robô o referencia por id de qualquer outro SVG do documento — é
+  // o mesmo matiz que o elenco e o registro pintam por CSS, para o principal se
+  // ler igual nos três lugares.
+  const defs = add('defs', {});
+  const grad = document.createElementNS(ns, 'linearGradient');
+  grad.setAttribute('id', 'agentRainbow');
+  grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
+  grad.setAttribute('x2', '1'); grad.setAttribute('y2', '1');
+  const stops = [['0', 'hsl(0 80% 62%)'], ['.2', 'hsl(32 85% 60%)'], ['.4', 'hsl(52 85% 58%)'],
+                 ['.6', 'hsl(145 60% 52%)'], ['.8', 'hsl(210 70% 58%)'], ['1', 'hsl(280 60% 64%)']];
+  for (const [off, col] of stops) {
+    const stop = document.createElementNS(ns, 'stop');
+    stop.setAttribute('offset', off);
+    stop.setAttribute('stop-color', col);
+    grad.appendChild(stop);
+  }
+  defs.appendChild(grad);
 
   const M = 26;                       // margem do desenho
   const W = PLAN.w - M * 2;
@@ -164,22 +187,31 @@ function hitProp(prop) {
   n.timer = setTimeout(() => n.root.classList.remove('hit'), 2600);
 }
 
-// ── o boneco ──────────────────────────────────────────────────────────────
+// ── o robô ──────────────────────────────────────────────────────────────
 
-// Figura de escala: cabeça, tronco, dois braços e duas pernas, com as juntas
-// separadas em grupos para as animações de passada e digitação morderem.
-const FIGURE = `
-<svg width="34" height="52" viewBox="0 0 34 52">
-  <ellipse class="drop" cx="17" cy="49" rx="11" ry="3.2"/>
+// Robô de esteira: carcaça arredondada (a carcaça é o matiz), tela-rosto com os
+// três estados, e esteiras que são desenho — nunca animação, senão congelam
+// deformadas no primeiro frame do print headless. A plaqueta com o `agent_type`
+// fica fora do grupo `flip`, em HTML, para o texto nunca sair espelhado.
+const ROBOT = `
+<svg width="40" height="52" viewBox="0 0 40 52">
+  <ellipse class="drop" cx="20" cy="49" rx="14" ry="3.4"/>
   <g class="flip">
-    <path class="limb leg leg-a" d="M14 33v14"/>
-    <path class="limb leg leg-b" d="M20 33v14"/>
-    <path class="torso" d="M9.5 17h15a2 2 0 0 1 2 2.2l-1.6 13A3 3 0 0 1 22 35h-10a3 3 0 0 1-3-2.8L7.5 19.2A2 2 0 0 1 9.5 17Z"/>
-    <path class="shade" d="M22 17h2.5a2 2 0 0 1 2 2.2l-1.6 13A3 3 0 0 1 22 35h-1.6Z" opacity=".5"/>
-    <path class="limb arm arm-a" d="M10 21l-3.5 11"/>
-    <path class="limb arm arm-b" d="M24 21l3.5 11"/>
-    <circle class="head" cx="17" cy="9.5" r="7.6"/>
-    <path class="shade" d="M17 1.9a7.6 7.6 0 0 1 0 15.2Z" opacity=".28"/>
+    <path class="antenna" d="M20 8V3"/>
+    <circle class="beacon" cx="20" cy="2" r="1.8"/>
+    <g class="treads">
+      <rect class="tread" x="2.5" y="38" width="14" height="11" rx="5.5"/>
+      <rect class="tread" x="23.5" y="38" width="14" height="11" rx="5.5"/>
+      <path class="tread-notch" d="M5 40v7M8 40v7M11 40v7M14 40v7M26 40v7M29 40v7M32 40v7M35 40v7"/>
+    </g>
+    <rect class="chassis" x="5" y="8" width="30" height="32" rx="8"/>
+    <path class="chassis-shade" d="M35 16v16a8 8 0 0 1-8 8h-4V8h4a8 8 0 0 1 8 8Z"/>
+    <rect class="screen" x="9" y="12" width="22" height="13" rx="4"/>
+    <g class="face">
+      <g class="m m-idle"><circle class="eye" cx="16" cy="18.5" r="2.1"/><circle class="eye" cx="24" cy="18.5" r="2.1"/></g>
+      <g class="m m-work"><path class="eye-line" d="M13.6 18.5h4.8M21.6 18.5h4.8"/></g>
+      <g class="m m-error"><path class="eye-x" d="M14 16.5l4 4M18 16.5l-4 4M22 16.5l4 4M26 16.5l-4 4"/></g>
+    </g>
   </g>
 </svg>`;
 
@@ -188,13 +220,18 @@ function mountAgent(agent, instant) {
   node.className = 'agent';
   node.style.setProperty('--h', hueOf(agent));
   node.dataset.face = String(agent.face);
+  node.dataset.mood = moodOf(agent);
   if (agent.isMain) node.dataset.main = '';
+  const who = agent.isMain ? 'principal' : agent.type;
   node.innerHTML =
-    `<div class="figure">${FIGURE}</div>` +
-    `<div class="agent-name"><span class="who"></span><span class="agent-tool"></span></div>`;
+    `<div class="figure">${ROBOT}<div class="plate"><span class="plate-type"></span></div></div>` +
+    `<div class="agent-name"><span class="agent-tool"></span></div>`;
 
-  const name = node.querySelector('.who');
-  name.textContent = agent.isMain ? 'principal' : agent.type;
+  // A plaqueta carrega o `agent_type`; o nome cru cabe no title para quando o
+  // tipo é longo demais e a plaqueta corta com reticências.
+  const plate = node.querySelector('.plate-type');
+  plate.textContent = who;
+  plate.parentElement.title = who;
   // Quem fala fica acima de quem só trabalha, e balões de agentes diferentes
   // se escalonam em altura para não se cobrirem quando todos falam juntos.
   node.style.setProperty('--lift', (nodes.size % 3) * 48 + 'px');
@@ -226,6 +263,7 @@ function stateAgent(agent) {
   const rec = nodes.get(agent.id);
   if (!rec) return;
   rec.root.classList.toggle('working', agent.status === 'working');
+  rec.root.dataset.mood = moodOf(agent);
   rec.tool.textContent = agent.tool || '';
 }
 

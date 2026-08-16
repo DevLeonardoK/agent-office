@@ -10,7 +10,7 @@ export function clip(v, n = MAX_TEXT) {
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
 
-// O que o boneco está fazendo determina em qual móvel ele vai encostar.
+// O que o robô está fazendo determina em qual móvel ele vai encostar.
 // A chave é estável, então dois agentes lendo o mesmo arquivo disputam a
 // mesma mesa em vez de cada um ganhar a sua.
 export function propFor(tool, input = {}) {

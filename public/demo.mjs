@@ -38,6 +38,8 @@ export const SCRIPT = [
   [900,  { ...tdd, kind: 'tool_start', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal', detail: 'npm test -- auth' } }],
   [1800, { ...plan, kind: 'stop', text: 'Plano em 3 etapas: extrair o guard, unificar a sessão, migrar o middleware v1.' }],
   [1000, { ...tdd, kind: 'tool_end', tool: 'Bash' }],
+  [500,  { ...main, kind: 'tool_start', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal', detail: 'npm run lint' } }],
+  [900,  { ...main, kind: 'tool_end', tool: 'Bash', failed: true }],   // o rosto do robô mostra o X
   [500,  { ...main, kind: 'tool_start', tool: 'Edit', prop: file('auth.ts') }],
   [1600, { ...main, kind: 'tool_end', tool: 'Edit' }],
   [400,  { ...tdd, kind: 'stop', text: 'Suíte verde: 34 testes, 0 falhas.' }],

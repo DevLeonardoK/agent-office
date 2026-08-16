@@ -43,13 +43,13 @@ function placeProp(scene, seed) {
   return { x: desk.x, y: desk.y, room: 'MESAS', fixed: false };
 }
 
-/** Onde o boneco fica em pé para usar o móvel. `rank` desempata quem chegou junto. */
+/** Onde o robô fica em pé para usar o móvel. `rank` desempata quem chegou junto. */
 export function station(prop, rank = 0) {
   const above = prop.y > PLAN.h / 2;          // móvel embaixo: aborda por cima
   const side = rank % 2 === 0 ? 1 : -1;
   const spread = Math.ceil(rank / 2) * 40;
-  // Folga suficiente para o boneco não cobrir o rótulo do móvel: ele tem 46px
-  // acima dos pés, e o rótulo desce ~52px abaixo do centro do símbolo.
+  // Folga suficiente para o robô não cobrir o rótulo do móvel: ele tem 46px
+  // acima das esteiras, e o rótulo desce ~52px abaixo do centro do símbolo.
   return {
     x: prop.x + side * spread,
     y: prop.y + (above ? -62 : 100),
@@ -122,7 +122,7 @@ const KINDS = new Set(['spawn', 'tool_start', 'tool_end', 'stop', 'prompt', 'tur
 
 export function apply(scene, ev) {
   // Validar antes de tocar no elenco: senão um evento que a cena não desenha
-  // ainda assim faria nascer um boneco na planta.
+  // ainda assim faria nascer um robô na planta.
   if (!KINDS.has(ev.kind)) return [];
 
   const cmds = [];
@@ -172,7 +172,9 @@ export function apply(scene, ev) {
     }
 
     case 'tool_end':
-      a.status = 'idle';
+      // Uma falha deixa o rosto do robô com um X até a próxima ação; qualquer
+      // outro evento (tool_start, turn_end) o traz de volta ao normal.
+      a.status = ev.failed ? 'error' : 'idle';
       a.tool = null;
       a.propKey = null;
       a.since = Date.now();
