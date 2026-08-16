@@ -19,6 +19,7 @@ export function makeSession(id, cwd, now) {
     label: cwd ? path.basename(cwd) : id.slice(0, 8),
     startedAt: now,
     lastSeen: now,
+    closed: false,
     agents: new Map(),
     props: new Map(),
     history: [],
