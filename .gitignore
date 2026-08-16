@@ -2,3 +2,6 @@ node_modules/
 
 # Lixo do WSL ao copiar arquivos do Windows.
 *:Zone.Identifier
+
+# Diretório temporário do Sandcastle: o snap do Docker não enxerga /tmp.
+.sandcastle/tmp/

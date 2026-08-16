@@ -4,6 +4,6 @@
   },
   "scripts": {
     "test": "node selftest.mjs",
-    "sandcastle": "npx tsx .sandcastle/main.mts"
+    "sandcastle": "mkdir -p .sandcastle/tmp && TMPDIR=$PWD/.sandcastle/tmp npx tsx .sandcastle/main.mts"
   }
 }
