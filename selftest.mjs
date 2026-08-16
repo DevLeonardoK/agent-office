@@ -9,6 +9,7 @@ import { createScene, apply, hydrate, station, PLAN, DOOR, STATIONS } from './pu
 import { shape } from './shape.mjs';
 import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 let pass = 0;
 const fails = [];
@@ -119,8 +120,9 @@ const deskProp = (name) => ({ kind: 'desk', key: 'file:' + name, label: name });
 
 // ── o renderizador ao menos analisa ───────────────────────────────────────
 {
-  const tmp = new URL('./.__office_check.mjs', import.meta.url);
-  const path = tmp.pathname.replace(/^\//, '');
+  // fileURLToPath e não `pathname`: no Windows o pathname vem como `/C:/...` e
+  // precisa perder a barra, no Linux perder a barra quebra o caminho.
+  const path = fileURLToPath(new URL('./.__office_check.mjs', import.meta.url));
   try {
     writeFileSync(path, readFileSync(new URL('./public/office.js', import.meta.url), 'utf8'));
     execFileSync(process.execPath, ['--check', path], { stdio: 'pipe' });

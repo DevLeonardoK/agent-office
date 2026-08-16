@@ -3,6 +3,7 @@
     "@ai-hero/sandcastle": "^0.12.0"
   },
   "scripts": {
+    "test": "node selftest.mjs",
     "sandcastle": "npx tsx .sandcastle/main.mts"
   }
 }
