@@ -4,7 +4,7 @@
 // cada comando da cena vira pixel e movimento.
 
 import { animate, stagger } from './vendor/motion.js';
-import { createScene, apply, hydrate, PLAN, DOOR, STATIONS, GROUND, FLOOR, ROOMS_PER_FLOOR, roomRect } from './scene.mjs';
+import { createScene, apply, rebuild, PLAN, DOOR, STATIONS, GROUND, FLOOR, ROOMS_PER_FLOOR, roomRect } from './scene.mjs';
 
 const params = new URLSearchParams(location.search);
 
@@ -131,7 +131,7 @@ const SYMBOL = {
   door: `<path class="sym" d="M20 46V12"/><path class="sym" d="M20 12a34 34 0 0 1 34 34" stroke-dasharray="3 4" opacity=".6"/>`,
 };
 
-function mountProp(prop) {
+function mountProp(prop, instant) {
   const node = document.createElement('div');
   node.className = 'prop';
   node.innerHTML =
@@ -145,11 +145,13 @@ function mountProp(prop) {
   // A posição tem que entrar pela motion: ela compõe o `transform` a partir de
   // x/y/scale e sobrescreveria qualquer translate escrito na mão.
   animate(node, { x: prop.x, y: prop.y }, { duration: 0 });
-  animate(node, { opacity: [0, 1], scale: [0.82, 1] }, POP);
+  // Na reconstrução o móvel já nasce no lugar; ao vivo ele surge com um pop.
+  animate(node, instant ? { opacity: 1, scale: 1 } : { opacity: [0, 1], scale: [0.82, 1] }, instant ? { duration: 0 } : POP);
   return node;
 }
 
-function hitProp(prop) {
+function hitProp(prop, instant) {
+  if (instant) return;   // reacender cada uso do log de uma vez seria só ruído
   const n = propNodes.get(prop.key);
   if (!n) return;
   n.root.classList.add('hit');
@@ -158,10 +160,10 @@ function hitProp(prop) {
 }
 
 // O móvel segue o dono quando ele muda de cômodo (realocação da issue #7).
-function moveProp(prop) {
+function moveProp(prop, instant) {
   const n = propNodes.get(prop.key);
   if (!n) return;
-  animate(n.root, { x: prop.x, y: prop.y }, WALK);
+  animate(n.root, { x: prop.x, y: prop.y }, instant ? { duration: 0 } : WALK);
 }
 
 // O móvel some quando o dono deixa o prédio: o cômodo é esvaziado para o
@@ -221,12 +223,15 @@ function mountAgent(agent, instant) {
   return rec;
 }
 
-function walkAgent(id, x, y, face, elevator) {
+function walkAgent(id, x, y, face, elevator, instant) {
   const rec = nodes.get(id);
   if (!rec) return;
   rec.root.dataset.face = String(face);
-  rec.root.classList.add('walking');
 
+  // Na reconstrução o agente já está parado no destino: nada de caminhada.
+  if (instant) { animate(rec.root, { x, y }, { duration: 0 }); return; }
+
+  rec.root.classList.add('walking');
   // A descida/subida de elevador até a estação (issue #9) é uma viagem rápida,
   // não uma caminhada realista: um trajeto curto de ~300 ms. O trajeto normal
   // usa o spring, que preserva velocidade quando interrompido, então mudar de
@@ -245,17 +250,20 @@ function stateAgent(agent) {
   rec.tool.textContent = agent.tool || '';
 }
 
-function leaveAgent(id) {
+function leaveAgent(id, instant) {
   const rec = nodes.get(id);
   if (!rec) return;
   nodes.delete(id);
   rec.root.classList.remove('working');
+  // Reconstruindo, quem já saiu na sessão simplesmente não está no prédio.
+  if (instant) { rec.root.remove(); return; }
   animate(rec.root, { opacity: 0, scale: 0.72 }, { duration: REDUCED ? 0 : 0.5, delay: REDUCED ? 0 : 1.6 })
     .finished.then(() => rec.root.remove())
     .catch(() => rec.root.remove());
 }
 
-function sayAgent(id, text, tone) {
+function sayAgent(id, text, tone, instant) {
+  if (instant) return;   // balão de fala é do agora; o passado fica no registro
   const rec = nodes.get(id);
   if (!rec || !text) return;
 
@@ -406,18 +414,18 @@ function run(cmds) {
 
   for (const c of cmds) {
     switch (c.op) {
-      case 'prop-add': mountProp(c.prop); break;
-      case 'prop-hit': hitProp(c.prop); break;
-      case 'prop-move': moveProp(c.prop); break;
+      case 'prop-add': mountProp(c.prop, c.instant); break;
+      case 'prop-hit': hitProp(c.prop, c.instant); break;
+      case 'prop-move': moveProp(c.prop, c.instant); break;
       case 'prop-remove': removeProp(c.key); break;
       case 'agent-enter':
         mountAgent(c.agent, c.instant);
         touchedCast = true;
         break;
-      case 'agent-move': walkAgent(c.id, c.x, c.y, c.face, c.elevator); break;
+      case 'agent-move': walkAgent(c.id, c.x, c.y, c.face, c.elevator, c.instant); break;
       case 'agent-state': stateAgent(c.agent); touchedCast = true; break;
-      case 'agent-leave': leaveAgent(c.id); touchedCast = true; break;
-      case 'say': sayAgent(c.id, c.text, c.tone); break;
+      case 'agent-leave': leaveAgent(c.id, c.instant); touchedCast = true; break;
+      case 'say': sayAgent(c.id, c.text, c.tone, c.instant); break;
       case 'log': renderLog(c.event); break;
     }
   }
@@ -442,10 +450,8 @@ function clearRoom() {
 function enterRoom(id, room) {
   currentRoom = id;
   clearRoom();
-  run(hydrate(scene, room));
-  if (!REDUCED && propNodes.size) {
-    animate([...propNodes.values()].map((n) => n.root), { opacity: [0, 1], scale: [0.86, 1] }, { ...POP, delay: stagger(0.035) });
-  }
+  // Monta o prédio aplicando a lista de eventos da sessão desde o começo.
+  run(rebuild(scene, room?.events));
   renderCast();
   renderDoors();
   $empty.hidden = scene.agents.size > 0;
@@ -463,7 +469,7 @@ async function switchRoom(id, pending) {
   }
   enterRoom(id, room);
   refreshRooms();
-  if (pending && !room?.history.some((h) => h.seq === pending.seq)) run(apply(scene, pending));
+  if (pending && !room?.events.some((h) => h.seq === pending.seq)) run(apply(scene, pending));
 }
 
 function refreshRooms() {

@@ -9,7 +9,7 @@
 //   node selftest.mjs
 
 import {
-  createScene, apply, hydrate, roomRect, ROOMS_PER_FLOOR, GROUND,
+  createScene, apply, rebuild, roomRect, ROOMS_PER_FLOOR, GROUND,
   DOOR, STATIONS, MAIN_ROOM, floorCount, PLAN,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
@@ -187,24 +187,21 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('o próximo recicla a vaga', s.agents.get('a2').room === room1);
 }
 
-// ── troca de sessão reconstrói os cômodos ───────────────────────────────────
+// ── reconstrução a partir do log (recarregar / trocar de sessão) ──────────
 {
+  const events = [
+    evt({ kind: 'tool_start', agentId: 'main', agentType: 'main', tool: 'Read', prop: deskProp('velho.ts') }),
+    evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }),
+    evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }),
+  ];
   const s = createScene();
-  apply(s, evt({ kind: 'tool_start', tool: 'Read', prop: deskProp('velho.ts') }));
-  const c = hydrate(s, {
-    props: [{ kind: 'desk', key: 'file:novo.ts', label: 'novo.ts' }, { kind: 'terminal', key: 'terminal', label: 'terminal' }],
-    agents: [
-      { id: 'main', type: 'main', status: 'working', tool: 'Bash', prop: 'terminal', toolCount: 3 },
-      { id: 'a1', type: 'Explore', status: 'working', tool: 'Read', prop: 'file:novo.ts', toolCount: 1 },
-    ],
-  });
-  ok('sala antiga é esvaziada', !s.props.has('main|file:velho.ts'));
-  ok('a sessão nova é montada', s.agents.size === 2);
-  ok('o agente é recolocado sem "chegar"', cmdsOf(c, 'agent-enter').every((e) => e.instant === true));
-  const a1 = s.agents.get('a1');
-  ok('o móvel renasce no cômodo do dono', insideRoom(s.props.get('a1|file:novo.ts').x, s.props.get('a1|file:novo.ts').y, a1.room));
-  { const v = invariantsHold(s); ok('invariantes valem após a troca', v.ok, v.detail); }
+  const c = rebuild(s, events);
+  ok('rebuild monta os móveis do log', s.props.size === 2);
+  ok('rebuild monta os agentes do log', s.agents.size === 2);
+  ok('rebuild entra instantâneo', cmdsOf(c, 'agent-enter').every((e) => e.instant === true));
+  ok('rebuild não anima o movimento', cmdsOf(c, 'agent-move').every((m) => m.instant === true));
 }
+
 
 // ── o cômodo do principal fica no 1º andar ──────────────────────────────────
 {
@@ -334,6 +331,28 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('os dois na estação, no térreo', a1.away && a2.away && a1.y >= GROUND.y && a2.y >= GROUND.y);
   ok('os dois não se sobrepõem na estação', Math.hypot(a1.x - a2.x, a1.y - a2.y) > 24, `a1=${a1.x} a2=${a2.x}`);
   { const v = invariantsHold(s); ok('invariantes valem com dois na estação', v.ok, v.detail); }
+}
+
+// ── pureza (ADR-0001): reconstruir do log é idêntico ao construído ao vivo ─
+{
+  const events = [
+    evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }),
+    evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('auth.ts') }),
+    evt({ kind: 'spawn', agentId: 'a2', agentType: 'Plan' }),
+    evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'Read', prop: deskProp('auth.ts') }),
+    evt({ kind: 'tool_start', agentId: 'main', agentType: 'main', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }),
+  ];
+
+  const live = createScene();
+  for (const ev of events) apply(live, ev);   // ao vivo: um evento de cada vez
+
+  const rebuilt = createScene();
+  rebuild(rebuilt, events);                    // reconstruído: o log inteiro de uma vez
+
+  const posA = (s) => [...s.agents.values()].map((a) => `${a.id}:${a.x},${a.y}`).sort().join('|');
+  const posP = (s) => [...s.props.values()].map((p) => `${p.key}:${p.x},${p.y}`).sort().join('|');
+  ok('agentes reconstruídos idênticos ao ao vivo', posA(live) === posA(rebuilt), `${posA(live)} ≠ ${posA(rebuilt)}`);
+  ok('móveis reconstruídos idênticos ao ao vivo', posP(live) === posP(rebuilt), `${posP(live)} ≠ ${posP(rebuilt)}`);
 }
 
 // ── entrada estranha não derruba ──────────────────────────────────────────

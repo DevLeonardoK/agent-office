@@ -358,42 +358,22 @@ export function apply(scene, ev) {
   return cmds;
 }
 
-/** Reconstrói a cena a partir do estado que o servidor guarda (troca de sessão). */
-export function hydrate(scene, room) {
+/**
+ * Reconstrói a cena aplicando a lista de eventos desde o início — é assim que
+ * um cliente que chega no meio (recarregar a página, trocar de sessão) monta o
+ * prédio, sem depender de nenhum instantâneo montado pelo servidor (ADR-0001).
+ *
+ * Construir ao vivo é a mesma construção, só que ainda não terminada: por isso
+ * `rebuild` é `apply` em sequência numa cena limpa. A única diferença é que
+ * cada comando sai marcado como instantâneo — o prédio aparece pronto em vez de
+ * reencenar a caminhada e o balão de fala de cada evento já passado.
+ */
+export function rebuild(scene, events) {
   scene.agents.clear();
   scene.props.clear();
   const cmds = [];
-  if (!room) return cmds;
-
-  // O servidor guarda o móvel atual de cada agente pela chave global; aqui ele
-  // renasce dentro do cômodo do dono, com a chave composta do novo modelo.
-  const seedByKey = new Map((room.props || []).map((p) => [p.key, p]));
-
-  for (const raw of room.agents) {
-    const enters = [];
-    const a = ensureAgent(scene, raw.id, raw.type, enters);
-    a.status = raw.status === 'working' ? 'working' : 'idle';
-    a.tool = raw.tool || null;
-    a.toolCount = raw.toolCount || 0;
-
-    let spot = roomHome(a.room);
-    if (raw.prop && seedByKey.has(raw.prop)) {
-      const p = ensureProp(scene, a, seedByKey.get(raw.prop), cmds);
-      a.propKey = p.key;
-      if (p.fixed) {
-        // Estava numa estação: renasce no térreo, com o cômodo "ocupado, fora".
-        const rank = [...scene.agents.values()].filter((o) => o !== a && o.away && o.propKey === p.key).length;
-        a.away = true;
-        spot = stationStand(p, rank);
-      } else {
-        spot = standAt(p, a.room);
-      }
-    }
-    a.x = spot.x;
-    a.y = spot.y;
-
-    // Ao trocar de sessão ninguém "chega": todo mundo já está no lugar.
-    for (const c of enters) cmds.push({ ...c, instant: true });
+  for (const ev of events || []) {
+    for (const c of apply(scene, ev)) cmds.push({ ...c, instant: true });
   }
   return cmds;
 }
