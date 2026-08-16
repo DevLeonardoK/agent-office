@@ -3,63 +3,90 @@
 // Recebe eventos do servidor e devolve uma lista de comandos que o renderizador
 // executa. A separação existe para o `selftest.mjs` poder exercitar toda a
 // lógica de posicionamento em Node, sem navegador.
+//
+// Modelo espacial (issue #4): um térreo de serviço fixo embaixo, com as quatro
+// estações singulares, e um 1º andar com cinco cômodos — um agente por cômodo,
+// e os móveis desse agente dentro do cômodo dele.
 
 export const PLAN = { w: 1000, h: 620 };
-export const DOOR = { x: 58, y: 300 };
 
-// Estações fixas: recursos que só existem em um exemplar no prédio ganham
-// endereço próprio, com o nome que aparece na planta.
+// Entrada do prédio, no canto do térreo. Quem sai do prédio caminha até aqui.
+export const DOOR = { x: 30, y: 545 };
+
+// Térreo de serviço: faixa fixa na base, sempre presente, não conta agentes.
+export const GROUND = { y: 470, h: PLAN.h - 470 };
+
+// As quatro estações canônicas (CONTEXT.md): recurso singular no prédio
+// inteiro, sempre no térreo. A chave delas é global — um só de cada.
 export const STATIONS = {
-  whiteboard: { x: 178, y: 168, label: 'QUADRO' },
-  terminal:   { x: 178, y: 468, label: 'TERMINAL' },
-  cabinet:    { x: 872, y: 168, label: 'ARQUIVO' },
-  library:    { x: 872, y: 318, label: 'BIBLIOTECA' },
-  shelf:      { x: 872, y: 468, label: 'MANUAIS' },
+  terminal:   { x: 150, y: 545, label: 'TERMINAL' },
+  library:    { x: 400, y: 545, label: 'BIBLIOTECA' },
+  whiteboard: { x: 630, y: 545, label: 'QUADRO' },
+  cabinet:    { x: 862, y: 545, label: 'ARQUIVO MORTO' },
 };
 
-// Arquivos são muitos e imprevisíveis, então ganham uma grade de mesas.
-const DESK_COLS = [340, 468, 596, 724];
-const DESK_ROWS = [168, 318, 468];
-const DESKS = DESK_ROWS.flatMap((y) => DESK_COLS.map((x) => ({ x, y })));
+// 1º andar: cinco cômodos lado a lado acima do térreo.
+export const ROOMS_PER_FLOOR = 5;
+export const FLOOR = { top: 40, bottom: GROUND.y - 14 };  // cômodos de y=40 a y=456
+const ROOM_W = PLAN.w / ROOMS_PER_FLOOR;                  // 200
 
-const CORRIDOR_Y = 566;   // onde quem está ocioso espera
+/** Retângulo do cômodo de índice `i`. É a única fonte de geometria do cômodo. */
+export function roomRect(i) {
+  const pad = 12;
+  return {
+    index: i,
+    x: i * ROOM_W + pad,
+    y: FLOOR.top,
+    w: ROOM_W - pad * 2,          // 176
+    h: FLOOR.bottom - FLOOR.top,  // 416
+    cx: i * ROOM_W + ROOM_W / 2,  // centro horizontal
+  };
+}
+
+/** Onde o robô fica parado no cômodo: centro, junto à base (perto do elevador). */
+function roomHome(i) {
+  const r = roomRect(i);
+  return { x: r.cx, y: FLOOR.bottom - 46 };
+}
+
+/** Posição do n-ésimo móvel dentro de um cômodo. Grade de duas colunas. */
+function propSlot(r, n) {
+  const col = n % 2;
+  const row = Math.floor(n / 2);
+  return {
+    x: r.cx + (col === 0 ? -40 : 40),
+    // Presa ao cômodo: com muitos móveis a coluna empilha até a base e para,
+    // para nenhum móvel escapar do cômodo do dono.
+    y: Math.min(FLOOR.top + 78 + row * 58, FLOOR.bottom - 70),
+  };
+}
+
+/** Onde o robô encosta para usar um móvel do próprio cômodo. */
+function standAt(prop, i) {
+  const r = roomRect(i);
+  return {
+    x: Math.max(r.x + 18, Math.min(prop.x, r.x + r.w - 18)),
+    y: Math.min(prop.y + 44, FLOOR.bottom - 40),
+  };
+}
 
 export function createScene() {
   return {
     agents: new Map(),
     props: new Map(),
-    deskCursor: 0,
   };
 }
 
-// ── posicionamento ────────────────────────────────────────────────────────
+// ── cômodos ────────────────────────────────────────────────────────────────
 
-function placeProp(scene, seed) {
-  const fixed = STATIONS[seed.kind];
-  if (fixed) return { x: fixed.x, y: fixed.y, room: fixed.label, fixed: true };
-
-  const desk = DESKS[scene.deskCursor % DESKS.length];
-  scene.deskCursor++;
-  return { x: desk.x, y: desk.y, room: 'MESAS', fixed: false };
-}
-
-/** Onde o boneco fica em pé para usar o móvel. `rank` desempata quem chegou junto. */
-export function station(prop, rank = 0) {
-  const above = prop.y > PLAN.h / 2;          // móvel embaixo: aborda por cima
-  const side = rank % 2 === 0 ? 1 : -1;
-  const spread = Math.ceil(rank / 2) * 40;
-  // Folga suficiente para o boneco não cobrir o rótulo do móvel: ele tem 46px
-  // acima dos pés, e o rótulo desce ~52px abaixo do centro do símbolo.
-  return {
-    x: prop.x + side * spread,
-    y: prop.y + (above ? -62 : 100),
-  };
-}
-
-function corridorSpot(scene, agent) {
-  const others = [...scene.agents.values()].filter((a) => a !== agent);
-  const lane = others.length;
-  return { x: 306 + (lane % 6) * 84, y: CORRIDOR_Y - (lane % 2) * 26 };
+/** Índice do primeiro cômodo livre. Vagas recicladas contam como livres. */
+function allocRoom(scene, except) {
+  const taken = new Set();
+  for (const a of scene.agents.values()) if (a !== except && a.room != null) taken.add(a.room);
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) if (!taken.has(i)) return i;
+  // Andar cheio: o crescimento para o 2º andar é a issue #7. Até lá, o excesso
+  // reaproveita o último cômodo — nenhum cenário de #4 chega a seis agentes.
+  return ROOMS_PER_FLOOR - 1;
 }
 
 // ── agentes e móveis ──────────────────────────────────────────────────────
@@ -78,12 +105,13 @@ function ensureAgent(scene, id, type, cmds) {
       tool: null,
       propKey: null,
       toolCount: 0,
+      deskCursor: 0,
       since: Date.now(),
     };
-    a.home = corridorSpot(scene, a);
-    // Subagentes chegam de fora; o principal já estava no prédio.
-    a.x = isMain ? a.home.x : DOOR.x;
-    a.y = isMain ? a.home.y : DOOR.y;
+    a.room = allocRoom(scene, a);
+    const home = roomHome(a.room);
+    a.x = home.x;
+    a.y = home.y;
     scene.agents.set(id, a);
     // Emitido aqui, e não só no spawn: o agente principal nunca dá spawn —
     // ele aparece no primeiro evento que gerar, e sem isto ficava invisível.
@@ -93,11 +121,22 @@ function ensureAgent(scene, id, type, cmds) {
   return a;
 }
 
-function ensureProp(scene, seed, cmds) {
-  let p = scene.props.get(seed.key);
+function ensureProp(scene, agent, seed, cmds) {
+  const station = STATIONS[seed.kind];
+  // Estação: chave global, singular no prédio. Móvel: chave composta por agente
+  // e recurso, então dois agentes no mesmo arquivo produzem dois móveis.
+  const key = station ? seed.key : agent.id + '|' + seed.key;
+
+  let p = scene.props.get(key);
   if (!p) {
-    p = { ...seed, ...placeProp(scene, seed), uses: 0, born: Date.now() };
-    scene.props.set(seed.key, p);
+    const pos = station
+      ? { x: station.x, y: station.y, room: station.label, fixed: true, owner: null }
+      : (() => {
+          const s = propSlot(roomRect(agent.room), agent.deskCursor++);
+          return { x: s.x, y: s.y, room: 'CÔMODO', fixed: false, owner: agent.id };
+        })();
+    p = { ...seed, key, ...pos, uses: 0, born: Date.now() };
+    scene.props.set(key, p);
     cmds.push({ op: 'prop-add', prop: p });
   }
   if (seed.detail) p.detail = seed.detail;
@@ -122,7 +161,7 @@ const KINDS = new Set(['spawn', 'tool_start', 'tool_end', 'stop', 'prompt', 'tur
 
 export function apply(scene, ev) {
   // Validar antes de tocar no elenco: senão um evento que a cena não desenha
-  // ainda assim faria nascer um boneco na planta.
+  // ainda assim faria nascer um robô na planta.
   if (!KINDS.has(ev.kind)) return [];
 
   const cmds = [];
@@ -132,52 +171,56 @@ export function apply(scene, ev) {
     case 'spawn': {
       a.status = 'walking';
       a.since = Date.now();
-      const spot = corridorSpot(scene, a);
-      a.home = spot;
-      moveTo(scene, a, spot.x, spot.y, cmds);
+      const home = roomHome(a.room);
+      moveTo(scene, a, home.x, home.y, cmds);
       break;
     }
 
     case 'tool_start': {
       const seed = ev.prop || { kind: 'desk', key: 'tool:' + ev.tool, label: ev.tool };
+      a.status = 'working';
+      a.tool = ev.tool;
+      a.toolCount++;
+      a.since = Date.now();
 
-      // Convocar um subagente acontece na porta — e a porta já está desenhada
-      // na planta, então não vira mobília no meio da sala.
+      // Convocar um subagente (a porta) e usar uma estação acontecem sem tirar o
+      // robô do cômodo por ora: a linhagem é a issue #10 e a descida de elevador
+      // até a estação é a #9. Até lá o robô trabalha do próprio cômodo.
       if (seed.kind === 'door') {
-        a.status = 'working';
-        a.tool = ev.tool;
         a.propKey = null;
-        a.toolCount++;
-        // Bem junto da porta: mais para dentro esbarraria na estação do quadro.
-        moveTo(scene, a, DOOR.x + 62, DOOR.y, cmds);
+        const home = roomHome(a.room);
+        moveTo(scene, a, home.x, home.y, cmds);
         cmds.push({ op: 'agent-state', agent: a });
         if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'order' });
         break;
       }
 
-      const p = ensureProp(scene, seed, cmds);
-      a.status = 'working';
-      a.tool = ev.tool;
+      const p = ensureProp(scene, a, seed, cmds);
       a.propKey = p.key;
-      a.toolCount++;
-      a.since = Date.now();
 
-      const rank = [...scene.agents.values()].filter((o) => o !== a && o.propKey === p.key).length;
-      const s = station(p, rank);
-      moveTo(scene, a, s.x, s.y, cmds);
+      if (p.fixed) {
+        const home = roomHome(a.room);
+        moveTo(scene, a, home.x, home.y, cmds);
+      } else {
+        const spot = standAt(p, a.room);
+        moveTo(scene, a, spot.x, spot.y, cmds);
+      }
       cmds.push({ op: 'prop-hit', prop: p, by: a.id });
       cmds.push({ op: 'agent-state', agent: a });
       if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'brief' });
       break;
     }
 
-    case 'tool_end':
+    case 'tool_end': {
       a.status = 'idle';
       a.tool = null;
       a.propKey = null;
       a.since = Date.now();
+      const home = roomHome(a.room);
+      moveTo(scene, a, home.x, home.y, cmds);
       cmds.push({ op: 'agent-state', agent: a });
       break;
+    }
 
     case 'stop':
       a.status = 'leaving';
@@ -186,6 +229,7 @@ export function apply(scene, ev) {
       moveTo(scene, a, DOOR.x, DOOR.y, cmds);
       if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'result' });
       cmds.push({ op: 'agent-leave', id: a.id });
+      // O cômodo é liberado: some do elenco e a vaga volta ao pool.
       scene.agents.delete(a.id);
       break;
 
@@ -193,15 +237,17 @@ export function apply(scene, ev) {
       cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'order' });
       break;
 
-    case 'turn_end':
+    case 'turn_end': {
       a.status = 'idle';
       a.tool = null;
       a.propKey = null;
       a.since = Date.now();
-      moveTo(scene, a, a.home.x, a.home.y, cmds);
+      const home = roomHome(a.room);
+      moveTo(scene, a, home.x, home.y, cmds);
       cmds.push({ op: 'agent-state', agent: a });
       if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'result' });
       break;
+    }
 
     case 'notify':
       cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'brief' });
@@ -215,29 +261,34 @@ export function apply(scene, ev) {
   return cmds;
 }
 
-/** Reconstrói a cena a partir do estado que o servidor guarda (troca de sala). */
+/** Reconstrói a cena a partir do estado que o servidor guarda (troca de sessão). */
 export function hydrate(scene, room) {
   scene.agents.clear();
   scene.props.clear();
-  scene.deskCursor = 0;
   const cmds = [];
   if (!room) return cmds;
 
-  for (const seed of room.props) ensureProp(scene, seed, cmds);
+  // O servidor guarda o móvel atual de cada agente pela chave global; aqui ele
+  // renasce dentro do cômodo do dono, com a chave composta do novo modelo.
+  const seedByKey = new Map((room.props || []).map((p) => [p.key, p]));
 
   for (const raw of room.agents) {
     const enters = [];
     const a = ensureAgent(scene, raw.id, raw.type, enters);
     a.status = raw.status === 'working' ? 'working' : 'idle';
-    a.tool = raw.tool;
+    a.tool = raw.tool || null;
     a.toolCount = raw.toolCount || 0;
-    a.propKey = raw.prop || null;
 
-    // Ao trocar de sala ninguém "chega": todo mundo já está no lugar.
-    const p = a.propKey && scene.props.get(a.propKey);
-    const spot = p ? station(p) : a.home;
+    let spot = roomHome(a.room);
+    if (raw.prop && seedByKey.has(raw.prop)) {
+      const p = ensureProp(scene, a, seedByKey.get(raw.prop), cmds);
+      a.propKey = p.key;
+      spot = p.fixed ? roomHome(a.room) : standAt(p, a.room);
+    }
     a.x = spot.x;
     a.y = spot.y;
+
+    // Ao trocar de sessão ninguém "chega": todo mundo já está no lugar.
     for (const c of enters) cmds.push({ ...c, instant: true });
   }
   return cmds;
