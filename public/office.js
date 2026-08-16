@@ -68,19 +68,10 @@ function drawBlueprint() {
   // o mesmo matiz que o elenco e o registro pintam por CSS, para o principal se
   // ler igual nos três lugares.
   const defs = add('defs', {});
-  const grad = document.createElementNS(ns, 'linearGradient');
-  grad.setAttribute('id', 'agentRainbow');
-  grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
-  grad.setAttribute('x2', '1'); grad.setAttribute('y2', '1');
+  const grad = add('linearGradient', { id: 'agentRainbow', x1: 0, y1: 0, x2: 1, y2: 1 }, defs);
   const stops = [['0', 'hsl(0 80% 62%)'], ['.2', 'hsl(32 85% 60%)'], ['.4', 'hsl(52 85% 58%)'],
                  ['.6', 'hsl(145 60% 52%)'], ['.8', 'hsl(210 70% 58%)'], ['1', 'hsl(280 60% 64%)']];
-  for (const [off, col] of stops) {
-    const stop = document.createElementNS(ns, 'stop');
-    stop.setAttribute('offset', off);
-    stop.setAttribute('stop-color', col);
-    grad.appendChild(stop);
-  }
-  defs.appendChild(grad);
+  for (const [off, col] of stops) add('stop', { offset: off, 'stop-color': col }, grad);
 
   const M = 26;                       // margem do desenho
   const W = PLAN.w - M * 2;
