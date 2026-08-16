@@ -183,7 +183,7 @@ const FIGURE = `
   </g>
 </svg>`;
 
-function mountAgent(agent, instant) {
+function mountAgent(agent, instant, cmd) {
   const node = document.createElement('div');
   node.className = 'agent';
   node.style.setProperty('--h', hueOf(agent));
@@ -204,7 +204,10 @@ function mountAgent(agent, instant) {
   const rec = { root: node, tool: node.querySelector('.agent-tool'), bubbleTimer: 0, walkTimer: 0 };
   nodes.set(agent.id, rec);
 
-  animate(node, { x: agent.x, y: agent.y }, { duration: 0 });
+  // O ponto de entrada vem no comando: o `moveTo` da cena já mexeu em agent.x,
+  // então sem o retrato o robô montaria no destino e a caminhada some.
+  const start = cmd && cmd.x != null ? cmd : agent;
+  animate(node, { x: start.x, y: start.y }, { duration: 0 });
   if (!instant) animate(node, { opacity: [0, 1], scale: [0.6, 1] }, POP);
   return rec;
 }
@@ -357,7 +360,7 @@ function run(cmds) {
       case 'prop-add': mountProp(c.prop); break;
       case 'prop-hit': hitProp(c.prop); break;
       case 'agent-enter':
-        mountAgent(c.agent, c.instant);
+        mountAgent(c.agent, c.instant, c);
         touchedCast = true;
         break;
       case 'agent-move': walkAgent(c.id, c.x, c.y, c.face); break;
