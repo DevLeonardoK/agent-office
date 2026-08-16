@@ -14,6 +14,7 @@ import {
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { appendEvent, logPathFor } from './logstore.mjs';
+import { SESSION_TTL, openSession, isDead, liveSessions } from './sessions.mjs';
 import { writeFileSync, unlinkSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -418,6 +419,41 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// ── ciclo de vida da sessão ────────────────────────────────────────────────
+{
+  const NOW = Date.now();
+  const store = new Map();
+
+  const s = openSession(store, 'sess-1', '/proj/app', NOW);
+  s.events.push({ seq: 1 });   // um pouco de trabalho aconteceu
+  ok('sessão nova nasce viva', !isDead(s, NOW));
+  ok('sessão viva entra na lista', liveSessions(store, NOW).length === 1);
+
+  // SessionEnd mata: marcada como fechada, some da lista, é varrida do armazém.
+  s.closed = true;
+  ok('SessionEnd mata a sessão', isDead(s, NOW));
+  ok('sessão morta sai da lista', liveSessions(store, NOW).length === 0);
+  ok('a morta é varrida do armazém', !store.has('sess-1'));
+
+  // Ressuscita ao voltar a agir — e o prédio vem reconstruído (sem os agentes de antes).
+  const s2 = openSession(store, 'sess-1', '/proj/app', NOW + 1000);
+  ok('sessão ressuscita ao voltar a agir', !isDead(s2, NOW + 1000));
+  ok('a ressuscitada volta à lista', liveSessions(store, NOW + 1000).length === 1);
+  ok('o prédio ressuscita reconstruído', s2.events.length === 0);
+
+  // Ressureição de uma morta que ainda não foi varrida: openSession reconstrói.
+  const a = openSession(store, 'sess-2', null, NOW);
+  a.events.push({ seq: 1 });
+  a.closed = true;
+  const b = openSession(store, 'sess-2', null, NOW + 5);
+  ok('openSession reconstrói a morta ainda no armazém', b !== a && !b.closed && b.events.length === 0);
+
+  // Rede de segurança: trinta minutos de silêncio matam sozinhos.
+  const later = NOW + 1000 + SESSION_TTL + 1;
+  ok('silêncio de 30 min mata a sessão', isDead(s2, later));
+  ok('a morta por silêncio sai da lista', liveSessions(store, later).length === 0);
 }
 
 // ── o renderizador ao menos analisa ───────────────────────────────────────

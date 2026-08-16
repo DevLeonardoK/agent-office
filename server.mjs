@@ -15,13 +15,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { shape } from './shape.mjs';
 import { appendEvent } from './logstore.mjs';
+import { openSession, endSession, liveSessions } from './sessions.mjs';
 
 const PORT = Number(process.env.AGENT_OFFICE_PORT || 4517);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(HERE, 'public');
 
 const HISTORY = 300;         // eventos guardados por sala, para quem chega depois
-const SESSION_TTL = 6 * 60 * 60 * 1000;  // sala esquecida apos 6h sem sinal
 
 /** @type {Map<string, Session>} */
 const sessions = new Map();
@@ -30,33 +30,12 @@ const clients = new Set();
 
 let seq = 0;
 
-function session(id, cwd) {
-  let s = sessions.get(id);
-  if (!s) {
-    s = {
-      id,
-      cwd: cwd || null,
-      label: cwd ? path.basename(cwd) : id.slice(0, 8),
-      startedAt: Date.now(),
-      lastSeen: Date.now(),
-      events: [],
-    };
-    sessions.set(id, s);
-  }
-  s.lastSeen = Date.now();
-  if (cwd && !s.cwd) {
-    s.cwd = cwd;
-    s.label = path.basename(cwd);
-  }
-  return s;
-}
-
-// Numera o evento e o guarda no buffer da sessao. Nao monta cena nenhuma: a
+// Numera o evento e o guarda no buffer da sala. Nao monta cena nenhuma: a
 // unica leitura que o servidor faz do conteudo e o `session_end`, que e
-// metadado de sessao (marca a sala como fechada no seletor), nao estado de cena.
+// metadado de sessao (a sala morre), nao estado de cena.
 function ingest(ev) {
-  const s = session(ev.session, ev.cwd);
-  if (ev.kind === 'session_end') s.closed = true;
+  const s = openSession(sessions, ev.session, ev.cwd, Date.now());
+  if (ev.kind === 'session_end') endSession(sessions, ev.session);
 
   const out = { ...ev, seq: ++seq };
   s.events.push(out);
@@ -76,26 +55,19 @@ function broadcast(payload) {
 }
 
 function snapshot() {
-  sweep();
+  // liveSessions varre as mortas antes de listar: o seletor do navegador só vê
+  // sessões vivas.
   return {
     type: 'snapshot',
     now: Date.now(),
-    sessions: [...sessions.values()]
-      .sort((a, b) => b.lastSeen - a.lastSeen)
-      .map((s) => ({
-        id: s.id,
-        label: s.label,
-        cwd: s.cwd,
-        closed: !!s.closed,
-        lastSeen: s.lastSeen,
-        events: s.events,
-      })),
+    sessions: liveSessions(sessions, Date.now()).map((s) => ({
+      id: s.id,
+      label: s.label,
+      cwd: s.cwd,
+      lastSeen: s.lastSeen,
+      events: s.events,
+    })),
   };
-}
-
-function sweep() {
-  const cutoff = Date.now() - SESSION_TTL;
-  for (const [id, s] of sessions) if (s.lastSeen < cutoff) sessions.delete(id);
 }
 
 // ── HTTP: hooks, pagina e fluxo SSE ───────────────────────────────────────
