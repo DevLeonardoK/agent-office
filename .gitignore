@@ -1,0 +1,4 @@
+node_modules/
+
+# Lixo do WSL ao copiar arquivos do Windows.
+*:Zone.Identifier

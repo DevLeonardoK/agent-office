@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Escritório dos Agentes</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23070d15'/%3E%3Cg fill='none' stroke='%234d7fa8' stroke-width='2'%3E%3Crect x='5' y='5' width='22' height='22'/%3E%3Cpath d='M5 19h8M19 5v8'/%3E%3C/g%3E%3Ccircle cx='21' cy='21' r='3.5' fill='%23f2b134'/%3E%3C/svg%3E" />
+<style>
+/* ═══════════════════════════════════════════════════════════════════════
+   Desenho frio, gente quente.
+   O prédio é uma planta técnica; os agentes são a única coisa saturada.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ink — tinta de prancheta, com viés azul: cinza puro leria como descuido */
+  --ink:        #070d15;
+  --plate:      #0b131d;
+  --plate-2:    #101a26;
+  --rule:       #1a2635;
+  --rule-soft:  #131e2b;
+
+  /* o azul técnico só desenha o prédio; nunca vira cor de agente */
+  --draft:      #4d7fa8;
+  --draft-dim:  rgba(77, 127, 168, .22);
+  --draft-grid: rgba(77, 127, 168, .07);
+
+  --text:       #d7e2ee;
+  --text-2:     #93a6ba;
+  --faint:      #62768c;
+
+  /* semântico, separado da identidade dos agentes */
+  --live:       #4ade80;
+  --dead:       #46586c;
+
+  --mono: ui-monospace, "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", monospace;
+  --sans: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+
+  /* escala tipográfica */
+  --t-micro: 9.5px;
+  --t-note:  10.5px;
+  --t-body:  12px;
+  --t-lead:  13px;
+  --t-head:  15px;
+
+  --rail-l: 200px;
+  --rail-r: 312px;
+}
+
+* { box-sizing: border-box; margin: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--ink);
+  color: var(--text);
+  font: 400 var(--t-body)/1.55 var(--sans);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── casca ──────────────────────────────────────────────────────────── */
+
+#app {
+  height: 100%;
+  display: grid;
+  grid-template-columns: var(--rail-l) minmax(0, 1fr) var(--rail-r);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "bar    bar   bar"
+    "roster stage feed";
+}
+
+#bar {
+  grid-area: bar;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 16px;
+  height: 46px;
+  background: var(--plate);
+  border-bottom: 1px solid var(--rule);
+}
+
+.brand { display: flex; align-items: center; gap: 9px; }
+.brand svg { display: block; }
+
+.brand h1 {
+  font: 600 var(--t-lead)/1 var(--sans);
+  letter-spacing: .01em;
+}
+
+/* etiquetas do desenho: caixa alta, mono, respirando */
+.tag {
+  font: 500 var(--t-micro)/1 var(--mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+select {
+  font: 400 var(--t-note)/1 var(--mono);
+  color: var(--text-2);
+  background: var(--plate-2);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 6px 8px;
+  max-width: 330px;
+}
+
+select:focus-visible, input:focus-visible {
+  outline: 2px solid var(--draft);
+  outline-offset: 1px;
+}
+
+#followLbl {
+  display: flex; align-items: center; gap: 6px;
+  cursor: pointer; user-select: none;
+  font: 400 var(--t-note)/1 var(--mono);
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+#followLbl input { accent-color: var(--draft); cursor: pointer; }
+
+#status {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 7px;
+  font: 400 var(--t-note)/1 var(--mono);
+  color: var(--faint);
+  letter-spacing: .06em;
+}
+
+#dot {
+  width: 6px; height: 6px;
+  background: var(--dead);
+  transition: background .4s, box-shadow .4s;
+}
+
+#dot.live { background: var(--live); box-shadow: 0 0 0 3px rgb(74 222 128 / .14); }
+
+/* ── trilhos ────────────────────────────────────────────────────────── */
+
+#roster, #feed {
+  background: var(--plate);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#roster { grid-area: roster; border-right: 1px solid var(--rule); }
+#feed   { grid-area: feed;   border-left:  1px solid var(--rule); }
+
+.rail-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding: 11px 13px 9px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.rail-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.rail-body::-webkit-scrollbar { width: 8px; }
+.rail-body::-webkit-scrollbar-thumb { background: var(--rule); }
+
+/* ── elenco (o resumo, antes do detalhe) ────────────────────────────── */
+
+.cast-row {
+  display: grid;
+  grid-template-columns: 9px 1fr;
+  gap: 9px;
+  align-items: start;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+/* estado codificado na forma, não só na cor: cheio = trabalhando */
+.chip {
+  width: 9px; height: 9px;
+  margin-top: 3px;
+  border: 1.5px solid hsl(var(--h) 72% 60%);
+  background: transparent;
+}
+
+.cast-row[data-status="working"] .chip {
+  background: hsl(var(--h) 72% 60%);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.cast-row[data-status="leaving"] { opacity: .45; }
+
+@keyframes pulse { 50% { opacity: .35; } }
+
+.cast-name {
+  font: 500 var(--t-body)/1.3 var(--mono);
+  color: hsl(var(--h) 62% 74%);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.cast-doing {
+  font: 400 var(--t-micro)/1.45 var(--mono);
+  color: var(--faint);
+  letter-spacing: .04em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.cast-doing b { color: var(--text-2); font-weight: 500; }
+
+/* o principal não usa matiz nenhuma: é creme, como o boneco dele */
+.cast-row[data-main] .cast-name, .log-row[data-main] .log-who { color: #e4dcc6; }
+.cast-row[data-main] .chip { border-color: #c9c0a8; }
+.cast-row[data-main][data-status="working"] .chip { background: #c9c0a8; }
+
+/* ── registro ───────────────────────────────────────────────────────── */
+
+.log-row {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 9px;
+  padding: 6px 13px;
+  font: 400 var(--t-note)/1.5 var(--mono);
+  border-bottom: 1px solid var(--rule-soft);
+}
+
+.log-at {
+  color: #3f5064;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+}
+
+.log-who { color: hsl(var(--h) 62% 70%); }
+.log-what { color: var(--text-2); word-break: break-word; }
+.log-what .verb { color: var(--faint); }
+.log-row[data-tone="speech"] .log-what { color: var(--text); }
+
+/* ── palco ──────────────────────────────────────────────────────────── */
+
+#stage {
+  grid-area: stage;
+  position: relative;
+  min-width: 0;
+  display: grid;
+  place-items: center;
+  /* grade da prancheta */
+  background:
+    repeating-linear-gradient(0deg, var(--draft-grid) 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(90deg, var(--draft-grid) 0 1px, transparent 1px 40px),
+    radial-gradient(120% 90% at 50% 0%, #0c1622 0%, var(--ink) 72%);
+}
+
+#plan {
+  position: relative;
+  width: 1000px;
+  height: 620px;
+  flex: none;
+  transform-origin: center;
+}
+
+#blueprint { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+#props, #agents { position: absolute; inset: 0; }
+
+/* ── móveis, como símbolo de planta ─────────────────────────────────── */
+
+.prop {
+  position: absolute;
+  top: 0; left: 0;
+  width: 104px;
+  margin: -34px 0 0 -52px;   /* ancora no centro do símbolo */
+  text-align: center;
+  will-change: transform, opacity;
+}
+
+.prop svg { display: block; margin: 0 auto; overflow: visible; }
+.prop .sym { stroke: var(--draft); fill: none; stroke-width: 1.4; transition: stroke .5s, filter .5s; }
+.prop .sym-fill { fill: rgb(77 127 168 / .07); stroke: none; transition: fill .5s; }
+
+.prop-label {
+  display: block;
+  margin-top: 5px;
+  font: 400 var(--t-micro)/1.25 var(--mono);
+  letter-spacing: .05em;
+  color: var(--faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: color .5s;
+}
+
+.prop.hit .sym { stroke: #9ec9e8; filter: drop-shadow(0 0 6px rgb(120 190 235 / .55)); }
+.prop.hit .sym-fill { fill: rgb(120 190 235 / .13); }
+.prop.hit .prop-label { color: var(--text-2); }
+
+/* ── agentes ────────────────────────────────────────────────────────── */
+
+.agent {
+  position: absolute;
+  top: 0; left: 0;
+  width: 0; height: 0;
+  will-change: transform;
+}
+
+.agent .figure { position: absolute; left: -17px; top: -46px; }
+.agent .figure svg { display: block; overflow: visible; }
+
+.agent .flip { transform-origin: 17px 46px; transition: transform .18s ease; }
+.agent[data-face="-1"] .flip { transform: scaleX(-1); }
+
+.agent .torso  { fill: hsl(var(--h) 74% 58%); }
+.agent .head   { fill: hsl(var(--h) 58% 80%); }
+.agent .limb   { stroke: hsl(var(--h) 62% 44%); stroke-width: 4.4; stroke-linecap: round; fill: none; }
+.agent .shade  { fill: hsl(var(--h) 62% 46%); }
+.agent .drop   { fill: #000; opacity: .42; }
+
+/* o principal é o único de outro material: claro, quase branco quente */
+.agent[data-main] .torso { fill: #f0ead9; }
+.agent[data-main] .head  { fill: #fbf7ec; }
+.agent[data-main] .limb  { stroke: #b5ad98; }
+.agent[data-main] .shade { fill: #cfc7b2; }
+
+.agent-name {
+  position: absolute;
+  left: -60px; top: 8px;
+  width: 120px;
+  text-align: center;
+  font: 500 var(--t-micro)/1.2 var(--mono);
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: hsl(var(--h) 55% 72%);
+  pointer-events: none;
+}
+
+.agent[data-main] .agent-name { color: #e4dcc6; }
+
+.agent-tool {
+  display: block;
+  font-size: 8.5px;
+  letter-spacing: .12em;
+  color: var(--faint);
+  min-height: 10px;
+}
+
+/* passada e digitação */
+.leg, .arm { transform-box: fill-box; }
+.leg-a, .leg-b { transform-origin: 50% 0%; }
+.arm-a, .arm-b { transform-origin: 50% 0%; }
+
+.agent.walking .leg-a { animation: step .44s linear infinite; }
+.agent.walking .leg-b { animation: step .44s linear infinite -.22s; }
+.agent.walking .arm-a { animation: swing .44s linear infinite -.22s; }
+.agent.walking .arm-b { animation: swing .44s linear infinite; }
+
+@keyframes step  { 0%, 100% { transform: rotate(19deg); } 50% { transform: rotate(-19deg); } }
+@keyframes swing { 0%, 100% { transform: rotate(-13deg); } 50% { transform: rotate(13deg); } }
+
+.agent.working .arm-a { animation: tap .26s ease-in-out infinite alternate; }
+.agent.working .arm-b { animation: tap .26s ease-in-out infinite alternate -.13s; }
+@keyframes tap { from { transform: rotate(6deg); } to { transform: rotate(26deg); } }
+
+.agent .figure { animation: breathe 3.6s ease-in-out infinite; }
+@keyframes breathe { 50% { transform: translateY(-1.2px); } }
+
+/* ── fala ───────────────────────────────────────────────────────────── */
+
+.bubble {
+  position: absolute;
+  bottom: calc(62px + var(--lift, 0px));
+  left: 50%;
+  width: max-content;
+  max-width: 236px;
+  padding: 7px 10px 8px;
+  transform: translateX(-50%);
+  background: #0a1420;
+  border: 1px solid hsl(var(--h) 45% 38%);
+  border-left-width: 2px;
+  font: 400 var(--t-note)/1.5 var(--mono);
+  color: var(--text);
+  text-align: left;
+  z-index: 20;
+  pointer-events: none;
+  box-shadow: 0 10px 26px rgb(0 0 0 / .6);
+}
+
+.bubble[data-anchor="left"] { left: -14px; transform: none; }
+.bubble[data-anchor="left"]::after { left: 22px; }
+
+.bubble::after {
+  content: "";
+  position: absolute;
+  left: 14px; bottom: -5px;
+  width: 8px; height: 8px;
+  background: #0a1420;
+  border-right: 1px solid hsl(var(--h) 45% 38%);
+  border-bottom: 1px solid hsl(var(--h) 45% 38%);
+  transform: rotate(45deg);
+}
+
+.bubble[data-tone="order"]  { border-color: var(--draft); }
+.bubble[data-tone="order"]::after { border-color: var(--draft); }
+.bubble[data-tone="result"] { border-color: hsl(var(--h) 50% 46%); }
+.bubble[data-tone="brief"]  { color: var(--text-2); }
+
+/* ── vazio ──────────────────────────────────────────────────────────── */
+
+#empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+  pointer-events: none;
+  transition: opacity .5s;
+}
+
+#empty[hidden] { display: none; }
+
+#empty p {
+  font: 400 var(--t-note)/1.7 var(--mono);
+  letter-spacing: .05em;
+  color: var(--faint);
+  max-width: 34ch;
+}
+
+#empty .tag { font-size: var(--t-body); letter-spacing: .3em; color: var(--text-2); }
+
+/* ── telas estreitas ────────────────────────────────────────────────── */
+
+@media (max-width: 1180px) {
+  #app { grid-template-columns: minmax(0, 1fr) var(--rail-r); grid-template-areas: "bar bar" "stage feed"; }
+  #roster { display: none; }
+}
+
+@media (max-width: 820px) {
+  #app { grid-template-columns: minmax(0, 1fr); grid-template-areas: "bar" "stage"; }
+  #feed { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header id="bar">
+    <div class="brand">
+      <svg width="17" height="17" viewBox="0 0 32 32" aria-hidden="true">
+        <rect x="4" y="4" width="24" height="24" fill="none" stroke="#4d7fa8" stroke-width="2" />
+        <path d="M4 20h9M20 4v9" stroke="#4d7fa8" stroke-width="2" />
+        <circle cx="21.5" cy="21.5" r="3.5" fill="#f2b134" />
+      </svg>
+      <h1>Escritório dos Agentes</h1>
+    </div>
+
+    <select id="rooms" aria-label="Sessão em exibição">
+      <option>sem sessões</option>
+    </select>
+
+    <label id="followLbl">
+      <input type="checkbox" id="follow" checked />
+      seguir a ativa
+    </label>
+
+    <div id="status"><i id="dot"></i><span id="statusText">conectando</span></div>
+  </header>
+
+  <aside id="roster">
+    <div class="rail-head">
+      <span class="tag">no prédio</span>
+      <span class="tag" id="castCount">0</span>
+    </div>
+    <div class="rail-body" id="castList"></div>
+  </aside>
+
+  <main id="stage">
+    <div id="plan">
+      <svg id="blueprint" viewBox="0 0 1000 620" aria-hidden="true"></svg>
+      <div id="props"></div>
+      <div id="agents"></div>
+    </div>
+
+    <div id="empty">
+      <span class="tag">prédio vazio</span>
+      <p>Peça alguma coisa ao Claude Code. Quem entrar aparece pela porta, à esquerda.</p>
+    </div>
+  </main>
+
+  <aside id="feed">
+    <div class="rail-head">
+      <span class="tag">registro</span>
+      <span class="tag" id="logCount"></span>
+    </div>
+    <div class="rail-body" id="logList"></div>
+  </aside>
+
+</div>
+<script type="module" src="/office.js"></script>
+</body>
+</html>
