@@ -118,6 +118,19 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
 
   apply(s, evt({ kind: 'tool_end', agentId: 'a1', agentType: 'Explore', tool: 'Read' }));
   ok('tool_end solta o móvel', s.agents.get('a1').propKey === null);
+  ok('tool_end sem falha volta a ocioso', s.agents.get('a1').status === 'idle');
+}
+
+// ── falha de ferramenta acende o rosto de erro do robô ────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('quebra.ts') }));
+  const c = apply(s, evt({ kind: 'tool_end', agentId: 'a1', agentType: 'Explore', tool: 'Read', failed: true }));
+  ok('falha marca o robô com erro', s.agents.get('a1').status === 'error');
+  ok('a falha emite estado para o rosto', cmdsOf(c, 'agent-state').length === 1);
+
+  apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('ok.ts') }));
+  ok('a ação seguinte limpa o erro', s.agents.get('a1').status === 'working');
 }
 
 // ── dois agentes no mesmo arquivo produzem dois móveis ──────────────────────

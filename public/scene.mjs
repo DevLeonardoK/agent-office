@@ -236,9 +236,9 @@ function moveTo(scene, a, x, y, cmds, extra) {
 
 // Volta o agente ao próprio cômodo, ocioso. De elevador se estava lá embaixo
 // numa estação (issue #9).
-function returnHome(scene, a, cmds) {
+function returnHome(scene, a, cmds, status = 'idle') {
   const wasAway = a.away;
-  a.status = 'idle';
+  a.status = status;
   a.tool = null;
   a.propKey = null;
   a.away = false;
@@ -315,7 +315,9 @@ export function apply(scene, ev) {
     }
 
     case 'tool_end':
-      returnHome(scene, a, cmds);
+      // Uma falha deixa o rosto do robô com um X até a próxima ação; qualquer
+      // outro evento (tool_start, turn_end) o traz de volta ao normal.
+      returnHome(scene, a, cmds, ev.failed ? 'error' : 'idle');
       break;
 
     case 'stop':
