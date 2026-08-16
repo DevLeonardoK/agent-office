@@ -4,7 +4,7 @@
 // cada comando da cena vira pixel e movimento.
 
 import { animate, stagger } from './vendor/motion.js';
-import { createScene, apply, hydrate, PLAN, DOOR, STATIONS } from './scene.mjs';
+import { createScene, apply, hydrate, PLAN, DOOR, STATIONS, GROUND, FLOOR, ROOMS_PER_FLOOR, roomRect } from './scene.mjs';
 
 const params = new URLSearchParams(location.search);
 
@@ -22,6 +22,7 @@ const $stage = el('stage');
 const $plan = el('plan');
 const $props = el('props');
 const $agents = el('agents');
+const $doors = el('doors');
 const $blueprint = el('blueprint');
 const $rooms = el('rooms');
 const $follow = el('follow');
@@ -58,8 +59,17 @@ function drawBlueprint() {
     parent.appendChild(n);
     return n;
   };
+  const line = (x1, y1, x2, y2, o = .55, w = 1) =>
+    add('path', { d: `M${x1} ${y1}L${x2} ${y2}`, stroke: 'var(--draft)', 'stroke-width': w, opacity: o });
+  const label = (x, y, text, o = .5) => {
+    const t = add('text', {
+      x, y, fill: 'var(--draft)', opacity: o,
+      'font-family': 'var(--mono)', 'font-size': 10, 'letter-spacing': 3.4, 'text-anchor': 'middle',
+    });
+    t.textContent = text;
+  };
 
-  const M = 26;                       // margem do desenho
+  const M = 24;                       // margem do desenho
   const W = PLAN.w - M * 2;
   const H = PLAN.h - M * 2;
 
@@ -75,47 +85,30 @@ function drawBlueprint() {
     });
   }
 
-  // porta, com o arco de abertura — o símbolo que todo mundo reconhece
+  // laje que separa o 1º andar do térreo de serviço
+  line(M, GROUND.y, PLAN.w - M, GROUND.y, .5, 2);
+
+  // 1º andar: cinco cômodos, separados por divisórias, com a plaqueta da porta
+  const roomW = PLAN.w / ROOMS_PER_FLOOR;
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
+    if (i > 0) line(i * roomW, FLOOR.top, i * roomW, GROUND.y, .16, 1);
+    const r = roomRect(i);
+    // vão da porta, sugerido no topo do cômodo
+    add('rect', { x: r.cx - 20, y: FLOOR.top - 2, width: 40, height: 4, fill: 'var(--ink)' });
+    line(r.cx - 20, FLOOR.top, r.cx - 20, FLOOR.top + 14, .35, 1);
+    line(r.cx + 20, FLOOR.top, r.cx + 20, FLOOR.top + 14, .35, 1);
+  }
+  label(PLAN.w / 2, FLOOR.top - 12, '1º ANDAR', .38);
+
+  // térreo de serviço: porta do prédio e as quatro estações
   const d = DOOR;
-  add('rect', { x: M - 3, y: d.y - 46, width: 11, height: 92, fill: 'var(--ink)' });
-  add('path', { d: `M${M + 8} ${d.y - 44}L${M + 8} ${d.y - 44 + 78}`, stroke: 'var(--draft)', 'stroke-width': 2 });
+  add('rect', { x: M - 3, y: d.y - 30, width: 11, height: 60, fill: 'var(--ink)' });
   add('path', {
-    d: `M${M + 8} ${d.y + 34}A78 78 0 0 0 ${M + 86} ${d.y - 44}`,
+    d: `M${M + 8} ${d.y + 26}A56 56 0 0 0 ${M + 64} ${d.y - 30}`,
     fill: 'none', stroke: 'var(--draft)', 'stroke-width': .9, 'stroke-dasharray': '3 4', opacity: .6,
   });
-
-  // divisórias internas: apenas sugeridas, para não competir com os agentes
-  const hint = (x1, y1, x2, y2) =>
-    add('path', { d: `M${x1} ${y1}L${x2} ${y2}`, stroke: 'var(--draft)', 'stroke-width': 1, opacity: .18 });
-  hint(268, 26, 268, 250);
-  hint(268, 390, 268, 594);
-  hint(788, 26, 788, 250);
-  hint(788, 390, 788, 594);
-  hint(268, 528, 788, 528);
-
-  // nomes das salas
-  const roomLabel = (x, y, text) => {
-    const t = add('text', {
-      x, y, fill: 'var(--draft)', opacity: .5,
-      'font-family': 'var(--mono)', 'font-size': 10, 'letter-spacing': 3.4,
-      'text-anchor': 'middle',
-    });
-    t.textContent = text;
-  };
-  // Nas estações da metade de baixo o agente encosta por cima, então o nome da
-  // sala desce para o outro lado do móvel em vez de ficar embaixo do boneco.
-  for (const s of Object.values(STATIONS)) {
-    roomLabel(s.x, s.y > PLAN.h / 2 ? s.y + 76 : s.y - 52, s.label);
-  }
-  roomLabel(532, 92, 'MESAS');
-  roomLabel(532, 556, 'CORREDOR');
-
-  // cota de largura, embaixo
-  const cy = PLAN.h - 12;
-  add('path', { d: `M${M} ${cy}L${PLAN.w - M} ${cy}`, stroke: 'var(--draft)', 'stroke-width': .6, opacity: .35 });
-  for (const x of [M, PLAN.w - M]) {
-    add('path', { d: `M${x} ${cy - 4}L${x} ${cy + 4}`, stroke: 'var(--draft)', 'stroke-width': 1, opacity: .5 });
-  }
+  for (const s of Object.values(STATIONS)) label(s.x, GROUND.y + GROUND.h - 16, s.label, .5);
+  label(PLAN.w - 96, GROUND.y + 18, 'TÉRREO DE SERVIÇO', .32);
 }
 
 // ── símbolos de planta para cada móvel ────────────────────────────────────
@@ -164,6 +157,25 @@ function hitProp(prop) {
   n.timer = setTimeout(() => n.root.classList.remove('hit'), 2600);
 }
 
+// O móvel segue o dono quando ele muda de cômodo (realocação da issue #7).
+function moveProp(prop) {
+  const n = propNodes.get(prop.key);
+  if (!n) return;
+  animate(n.root, { x: prop.x, y: prop.y }, WALK);
+}
+
+// O móvel some quando o dono deixa o prédio: o cômodo é esvaziado para o
+// próximo que reciclar a vaga.
+function removeProp(key) {
+  const n = propNodes.get(key);
+  if (!n) return;
+  clearTimeout(n.timer);
+  propNodes.delete(key);
+  animate(n.root, { opacity: 0, scale: 0.8 }, { duration: REDUCED ? 0 : 0.3 })
+    .finished.then(() => n.root.remove())
+    .catch(() => n.root.remove());
+}
+
 // ── o boneco ──────────────────────────────────────────────────────────────
 
 // Figura de escala: cabeça, tronco, dois braços e duas pernas, com as juntas
@@ -209,15 +221,19 @@ function mountAgent(agent, instant) {
   return rec;
 }
 
-function walkAgent(id, x, y, face) {
+function walkAgent(id, x, y, face, elevator) {
   const rec = nodes.get(id);
   if (!rec) return;
   rec.root.dataset.face = String(face);
   rec.root.classList.add('walking');
 
-  // O spring da motion preserva velocidade quando interrompido, então mudar de
+  // A descida/subida de elevador até a estação (issue #9) é uma viagem rápida,
+  // não uma caminhada realista: um trajeto curto de ~300 ms. O trajeto normal
+  // usa o spring, que preserva velocidade quando interrompido, então mudar de
   // destino no meio do caminho não dá solavanco.
-  const anim = animate(rec.root, { x, y }, WALK);
+  let opts = WALK;
+  if (elevator) opts = STILL ? { duration: 0 } : { duration: 0.3, ease: 'easeInOut' };
+  const anim = animate(rec.root, { x, y }, opts);
   clearTimeout(rec.walkTimer);
   anim.finished.then(() => rec.root.classList.remove('walking')).catch(() => {});
 }
@@ -297,6 +313,42 @@ function renderCast() {
   }
 }
 
+// A plaqueta da porta: mostra o agent_type do ocupante do cômodo. Posicionada
+// por left/top, não por transform — o transform é da motion, e as plaquetas não
+// são animadas por ela.
+function renderDoors() {
+  $doors.replaceChildren();
+  for (const a of scene.agents.values()) {
+    if (a.room == null) continue;
+    const r = roomRect(a.room);
+    const plate = document.createElement('div');
+    plate.className = 'door-plate';
+    plate.style.setProperty('--h', hueOf(a));
+    if (a.isMain) plate.dataset.main = '';
+    if (a.status === 'leaving') plate.dataset.leaving = '';
+    plate.textContent = a.isMain ? 'principal' : a.type;
+    plate.style.left = r.cx + 'px';
+    // A plaqueta acompanha o andar do cômodo, não o topo fixo do 1º andar.
+    plate.style.top = r.y + 'px';
+    $doors.appendChild(plate);
+
+    // O dono desceu ao térreo para usar uma estação (issue #9): o cômodo fica
+    // reservado, com a marca "ocupado, fora", para não se confundir com um
+    // cômodo vazio.
+    if (a.away) {
+      plate.dataset.away = '';
+      const mark = document.createElement('div');
+      mark.className = 'room-mark';
+      mark.style.setProperty('--h', hueOf(a));
+      if (a.isMain) mark.dataset.main = '';
+      mark.style.left = r.cx + 'px';
+      mark.style.top = (r.y + r.h / 2) + 'px';
+      mark.textContent = 'ocupado · fora';
+      $doors.appendChild(mark);
+    }
+  }
+}
+
 function propLabel(key) {
   return scene.props.get(key)?.label || '';
 }
@@ -356,11 +408,13 @@ function run(cmds) {
     switch (c.op) {
       case 'prop-add': mountProp(c.prop); break;
       case 'prop-hit': hitProp(c.prop); break;
+      case 'prop-move': moveProp(c.prop); break;
+      case 'prop-remove': removeProp(c.key); break;
       case 'agent-enter':
         mountAgent(c.agent, c.instant);
         touchedCast = true;
         break;
-      case 'agent-move': walkAgent(c.id, c.x, c.y, c.face); break;
+      case 'agent-move': walkAgent(c.id, c.x, c.y, c.face, c.elevator); break;
       case 'agent-state': stateAgent(c.agent); touchedCast = true; break;
       case 'agent-leave': leaveAgent(c.id); touchedCast = true; break;
       case 'say': sayAgent(c.id, c.text, c.tone); break;
@@ -368,7 +422,7 @@ function run(cmds) {
     }
   }
 
-  if (touchedCast) renderCast();
+  if (touchedCast) { renderCast(); renderDoors(); }
   $empty.hidden = scene.agents.size > 0;
 }
 
@@ -379,6 +433,7 @@ function clearRoom() {
   nodes.clear();
   for (const n of propNodes.values()) n.root.remove();
   propNodes.clear();
+  $doors.replaceChildren();
   $logList.replaceChildren();
   logged = 0;
   $logCount.textContent = '';
@@ -392,6 +447,7 @@ function enterRoom(id, room) {
     animate([...propNodes.values()].map((n) => n.root), { opacity: [0, 1], scale: [0.86, 1] }, { ...POP, delay: stagger(0.035) });
   }
   renderCast();
+  renderDoors();
   $empty.hidden = scene.agents.size > 0;
 }
 

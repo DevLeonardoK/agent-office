@@ -53,8 +53,9 @@ Três lugares, nesta ordem:
 
 1. `shape.mjs` → `propFor()`: qual `kind` a ferramenta produz.
 2. `public/scene.mjs` → `STATIONS`, se o recurso for singular (existe um só no
-   prédio e merece endereço fixo). Arquivos não entram aqui — eles ocupam a
-   grade `DESKS` conforme aparecem.
+   prédio e merece endereço fixo no térreo). Arquivos não entram aqui — eles
+   viram móvel dentro do cômodo do agente que os tocou, com chave composta por
+   agente e recurso.
 3. `public/office.js` → `SYMBOL`, o desenho em símbolo de planta, e `VERB`, o
    verbo em português que aparece no registro.
 
