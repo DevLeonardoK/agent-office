@@ -89,8 +89,9 @@ function drawBlueprint() {
   line(M, GROUND.y, PLAN.w - M, GROUND.y, .5, 2);
 
   // 1º andar: cinco cômodos, separados por divisórias, com a plaqueta da porta
+  const roomW = PLAN.w / ROOMS_PER_FLOOR;
   for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
-    if (i > 0) line(i * (PLAN.w / ROOMS_PER_FLOOR), FLOOR.top, i * (PLAN.w / ROOMS_PER_FLOOR), GROUND.y, .16, 1);
+    if (i > 0) line(i * roomW, FLOOR.top, i * roomW, GROUND.y, .16, 1);
     const r = roomRect(i);
     // vão da porta, sugerido no topo do cômodo
     add('rect', { x: r.cx - 20, y: FLOOR.top - 2, width: 40, height: 4, fill: 'var(--ink)' });

@@ -102,6 +102,11 @@ export function createScene() {
 
 // ── cômodos ────────────────────────────────────────────────────────────────
 
+/** Menor índice de cômodo que não está no conjunto de ocupados. */
+function firstFreeRoom(taken) {
+  for (let i = 0; ; i++) if (!taken.has(i)) return i;
+}
+
 /**
  * Índice do primeiro cômodo livre. Vagas recicladas contam como livres. O
  * prédio cresce para cima quando o andar enche: o sexto agente pega o slot 5,
@@ -118,7 +123,7 @@ function allocRoom(scene, agent) {
     if (a.room != null) taken.add(a.room);
   }
   if (mainPresent) taken.add(MAIN_ROOM);
-  for (let i = 0; ; i++) if (!taken.has(i)) return i;
+  return firstFreeRoom(taken);
 }
 
 /**
@@ -132,8 +137,7 @@ function relocateAgent(scene, agent, cmds) {
   const from = agent.room;
   const taken = new Set([MAIN_ROOM]);
   for (const a of scene.agents.values()) if (a !== agent && a.room != null) taken.add(a.room);
-  let dst = 0;
-  while (taken.has(dst)) dst++;
+  const dst = firstFreeRoom(taken);
 
   agent.room = dst;
   const home = roomHome(dst);
@@ -196,12 +200,13 @@ function ensureProp(scene, agent, seed, cmds) {
 
   let p = scene.props.get(key);
   if (!p) {
-    const pos = station
-      ? { x: station.x, y: station.y, room: station.label, fixed: true, owner: null }
-      : (() => {
-          const s = propSlot(roomRect(agent.room), agent.deskCursor++);
-          return { x: s.x, y: s.y, room: 'CÔMODO', fixed: false, owner: agent.id };
-        })();
+    let pos;
+    if (station) {
+      pos = { x: station.x, y: station.y, room: station.label, fixed: true, owner: null };
+    } else {
+      const s = propSlot(roomRect(agent.room), agent.deskCursor++);
+      pos = { x: s.x, y: s.y, room: 'CÔMODO', fixed: false, owner: agent.id };
+    }
     p = { ...seed, key, ...pos, uses: 0, born: Date.now() };
     scene.props.set(key, p);
     cmds.push({ op: 'prop-add', prop: p });

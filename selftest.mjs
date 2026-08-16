@@ -9,8 +9,8 @@
 //   node selftest.mjs
 
 import {
-  createScene, apply, hydrate, roomRect, ROOMS_PER_FLOOR, FLOOR, GROUND,
-  PLAN, DOOR, STATIONS, MAIN_ROOM, floorCount,
+  createScene, apply, hydrate, roomRect, ROOMS_PER_FLOOR, GROUND,
+  DOOR, STATIONS, MAIN_ROOM, floorCount,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { writeFileSync, unlinkSync, readFileSync } from 'node:fs';
@@ -323,7 +323,3 @@ if (fails.length) {
   process.exit(1);
 }
 console.log(`  ✔ ${pass} verificações passaram\n`);
-
-// PLAN mantido no import para o renderizador; referência silencia o linter.
-void PLAN;
-void FLOOR;
