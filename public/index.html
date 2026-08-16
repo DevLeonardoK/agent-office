@@ -49,6 +49,11 @@
   --t-lead:  13px;
   --t-head:  15px;
 
+  --floor: #0d1a28;
+  --wall: #0b1622;
+  --wall-2: #091220;
+  --slab: #0a1420;
+  --slab-2: #070f19;
   --rail-l: 200px;
   --rail-r: 312px;
 }
@@ -68,15 +73,16 @@ html, body {
 
 #app {
   height: 100%;
+  position: relative;   /* âncora dos trilhos flutuantes */
   display: grid;
-  /* Trilho recolhido vira uma faixa fina: a planta come o espaço que sobra,
-     em vez de ficar espremida entre elenco e registro. */
-  grid-template-columns: var(--rail-l) minmax(0, 1fr) var(--rail-r);
-  transition: grid-template-columns .28s ease;
+  /* Uma coluna só: os trilhos flutuam por cima do palco, em vez de disputarem
+     largura com ele. Antes, elenco e registro abertos comiam 512px e a planta
+     encolhia até caber no que sobrava. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
-    "bar    bar   bar"
-    "roster stage feed";
+    "bar"
+    "stage";
 }
 
 #bar {
@@ -156,11 +162,21 @@ select:focus-visible, input:focus-visible {
   min-height: 0;
 }
 
-#roster { grid-area: roster; border-right: 1px solid var(--rule); }
-#feed   { grid-area: feed;   border-left:  1px solid var(--rule); }
+/* Painéis flutuantes: encostados nas bordas do palco, translúcidos, com a
+   planta correndo por baixo. */
+#roster, #feed {
+  position: absolute;
+  top: 0; bottom: 0;
+  z-index: 60;
+  background: color-mix(in srgb, var(--plate) 88%, transparent);
+  backdrop-filter: blur(7px);
+  transition: width .26s ease;
+}
+#roster { grid-area: stage; left: 0;  width: var(--rail-l); border-right: 1px solid var(--rule); }
+#feed   { grid-area: stage; right: 0; width: var(--rail-r); border-left:  1px solid var(--rule); }
 
-#app[data-roster="off"] { --rail-l: 34px; }
-#app[data-feed="off"]   { --rail-r: 34px; }
+#app[data-roster="off"] { --rail-l: 36px; }
+#app[data-feed="off"]   { --rail-r: 36px; }
 
 /* Recolhido, sobra a lombada: o título de pé e o botão de reabrir. */
 #app[data-roster="off"] #roster .rail-body,
@@ -320,8 +336,8 @@ select:focus-visible, input:focus-visible {
 
 #plan {
   position: relative;
-  width: 1000px;
-  height: 620px;
+  width: 1160px;
+  height: 900px;
   flex: none;
   transform-origin: center;
 }
@@ -331,6 +347,7 @@ select:focus-visible, input:focus-visible {
 #blueprint { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
 
 #props, #agents, #doors, #floors { position: absolute; inset: 0; }
+.prop { z-index: 500; }
 
 /* ── vistas: corte vertical e andar cheio (issue #11) ────────────────────── */
 
@@ -432,7 +449,7 @@ select:focus-visible, input:focus-visible {
   will-change: transform, opacity;
 }
 
-.prop svg { display: block; margin: 0 auto; overflow: visible; }
+.prop svg { display: block; margin: 0 auto; overflow: visible; transform: scale(.72); }
 .prop .sym { stroke: var(--draft); fill: none; stroke-width: 1.4; transition: stroke .5s, filter .5s; }
 .prop .sym-fill { fill: rgb(77 127 168 / .07); stroke: none; transition: fill .5s; }
 
@@ -690,7 +707,7 @@ select:focus-visible, input:focus-visible {
 
   <main id="stage">
     <div id="plan">
-      <svg id="blueprint" viewBox="0 0 1000 620" aria-hidden="true"></svg>
+      <svg id="blueprint" viewBox="0 0 1160 900" aria-hidden="true"></svg>
       <div id="doors"></div>
       <div id="props"></div>
       <div id="agents"></div>

@@ -8,79 +8,117 @@
 // estações singulares, e um 1º andar com cinco cômodos — um agente por cômodo,
 // e os móveis desse agente dentro do cômodo dele.
 
-export const PLAN = { w: 1000, h: 620 };
+// ── o mundo isométrico ────────────────────────────────────────────────────
+//
+// O prédio deixou de ser uma elevação de frente: agora é isométrico, como a
+// referência em `media-agents/escriotorio1.png`. Cada andar é uma plataforma
+// de ladrilhos em losango, e os andares se empilham no eixo vertical da tela.
+//
+// A cena raciocina em **coordenadas de mundo** — `(wx, wy)` em ladrilhos sobre
+// a plataforma, mais o andar — e projeta com `iso()`. Todo comando sai já
+// projetado em pixels, então o renderizador continua sem saber de geometria:
+// ele só recebe x/y de tela, como antes.
 
-// Entrada do prédio, no canto do térreo. Quem sai do prédio caminha até aqui.
-export const DOOR = { x: 30, y: 545 };
+export const TILE = { w: 62, h: 31 };        // losango do ladrilho (2:1)
+export const LEVEL = 168;                    // quanto um andar sobe na tela
+export const PLATE = { x: 13, y: 8 };        // ladrilhos de uma plataforma
 
-// Térreo de serviço: faixa fixa na base, sempre presente, não conta agentes.
-export const GROUND = { y: 470, h: PLAN.h - 470 };
+// O plano de desenho. A origem fica no topo, no meio: dali as plataformas
+// descem para a direita e para a esquerda.
+export const PLAN = { w: 1160, h: 900 };
+const ORIGIN = { x: PLAN.w / 2, y: 300 };
 
-// As quatro estações canônicas (CONTEXT.md): recurso singular no prédio
-// inteiro, sempre no térreo. A chave delas é global — um só de cada.
-export const STATIONS = {
-  terminal:   { x: 150, y: 545, label: 'TERMINAL' },
-  library:    { x: 400, y: 545, label: 'BIBLIOTECA' },
-  whiteboard: { x: 630, y: 545, label: 'QUADRO' },
-  cabinet:    { x: 862, y: 545, label: 'ARQUIVO MORTO' },
-};
-
-// Andares empilhados: cada um tem cinco cômodos lado a lado. O 1º andar (andar
-// 0) fica logo acima do térreo; cada andar novo (issue #7) sobe sobre o
-// anterior. O cômodo é endereçado por um índice global: andar = ⌊slot / 5⌋,
-// coluna = slot % 5. O andar 0 nunca muda de geometria, então o cômodo do
-// principal (MAIN_ROOM) tem endereço constante a sessão inteira.
-export const ROOMS_PER_FLOOR = 5;
-
-// Poço do elevador: uma coluna própria na direita da planta, atravessando
-// todos os andares até o térreo. Não é cômodo e não conta agente — é o
-// caminho por onde o robô desce até uma estação e volta (issue #9).
-export const SHAFT = { w: 76, x: PLAN.w - 76 };
-export const shaftCenter = () => SHAFT.x + SHAFT.w / 2;
-export const FLOOR = { top: 40, bottom: GROUND.y - 14 };  // andar 0: y=40 a y=456
-const ROOM_W = SHAFT.x / ROOMS_PER_FLOOR;                 // a coluna do poço sai da conta
-const FLOOR_H = FLOOR.bottom - FLOOR.top;                 // 416
-const SLAB = 14;                                          // laje entre andares
-const FLOOR_PITCH = FLOOR_H + SLAB;                       // quanto cada andar sobe
-
-// Cômodo reservado ao agente principal: sempre no andar 0, nunca reciclado.
-export const MAIN_ROOM = 0;
-
-/** Retângulo do cômodo do slot global `slot`. Única fonte de geometria. */
-export function roomRect(slot) {
-  const floor = Math.floor(slot / ROOMS_PER_FLOOR);
-  const col = slot % ROOMS_PER_FLOOR;
-  const pad = 12;
+/** Projeta um ponto do mundo (ladrilhos, andar) para o pixel na tela. */
+export function iso(wx, wy, floor = 0) {
   return {
-    x: col * ROOM_W + pad,
-    y: FLOOR.top - floor * FLOOR_PITCH,   // andares acima têm y menor
-    w: ROOM_W - pad * 2,                  // 176
-    h: FLOOR_H,                           // 416
-    cx: col * ROOM_W + ROOM_W / 2,        // centro horizontal
+    x: ORIGIN.x + (wx - wy) * (TILE.w / 2),
+    y: ORIGIN.y + (wx + wy) * (TILE.h / 2) - floor * LEVEL,
   };
 }
 
 /**
- * Faixa vertical de um andar: os cinco cômodos daquele andar, de parede a
- * parede. É o que a vista de andar cheio enquadra (issue #11) — o térreo, que
- * não é andar, fica de fora.
+ * Profundidade de um ponto: quem tem mais wx+wy está mais à frente e tapa quem
+ * está atrás. O renderizador usa isto como z-index — sem ele, um robô no fundo
+ * do cômodo apareceria por cima da parede da frente.
  */
-export function floorRect(floor) {
-  const r = roomRect(floor * ROOMS_PER_FLOOR);
-  // Menos da metade da laje: assim a faixa de um andar nunca invade a do
-  // vizinho, e clicar num andar não pode acertar o de baixo.
-  const pad = 6;
-  return { x: 0, y: r.y - pad, w: PLAN.w, h: r.h + pad * 2 };
-}
+export const depth = (wx, wy, floor = 0) => Math.round((wx + wy) * 10 + floor * 1000);
+
+// O térreo de serviço é o andar -1: uma plataforma maior, sempre presente, que
+// não conta agentes. É onde ficam as quatro estações e a porta do prédio.
+export const GROUND_FLOOR = -1;
+export const GROUND_PLATE = { x: PLATE.x + 3, y: PLATE.y + 2 };
+
+// Entrada do prédio: o canto de quem chega de fora, no térreo.
+export const DOOR = iso(-1.4, GROUND_PLATE.y - 1.5, GROUND_FLOOR);
+
+// As quatro estações canônicas (CONTEXT.md): recurso singular no prédio
+// inteiro, sempre no térreo. A chave delas é global — um só de cada.
+const stationAt = (wx, wy, label) => ({ ...iso(wx, wy, GROUND_FLOOR), wx, wy, label });
+export const STATIONS = {
+  terminal:   stationAt(2.2, 6.6, 'TERMINAL'),
+  library:    stationAt(5.6, 6.6, 'BIBLIOTECA'),
+  whiteboard: stationAt(9.0, 6.6, 'QUADRO'),
+  cabinet:    stationAt(12.4, 6.6, 'ARQUIVO MORTO'),
+};
+
+// Cinco cômodos por andar, lado a lado ao longo do eixo wx da plataforma.
+export const ROOMS_PER_FLOOR = 5;
+const ROOM_TILES = PLATE.x / ROOMS_PER_FLOOR;   // 2,6 ladrilhos de frente
+
+// Cômodo reservado ao agente principal: sempre no andar 0, nunca reciclado.
+export const MAIN_ROOM = 0;
+
+// O elevador ocupa o fundo da plataforma (wy pequeno), na coluna do meio: de
+// lá a cabine desce até o térreo sem cruzar cômodo nenhum.
+export const SHAFT = { wx: PLATE.x / 2 - 1, wy: -1.6, w: 2, d: 1.4 };
 
 /**
- * O prédio inteiro como está agora: do topo do último andar até a base do
- * térreo. É o enquadramento do corte vertical, a vista padrão — cresce quando
- * um andar nasce e encolhe quando um é demolido.
+ * O cômodo `slot` em ladrilhos: `{ wx, wy, w, d, floor }`, onde wx/wy é o canto
+ * do fundo e w/d são frente e profundidade. Única fonte de geometria — quem
+ * precisa de pixel chama `iso()` sobre isto.
  */
+export function roomTiles(slot) {
+  const floor = Math.floor(slot / ROOMS_PER_FLOOR);
+  const col = slot % ROOMS_PER_FLOOR;
+  const pad = 0.18;
+  return { wx: col * ROOM_TILES + pad, wy: pad, w: ROOM_TILES - pad * 2, d: PLATE.y - pad * 2, floor };
+}
+
+/** Os quatro cantos do cômodo já projetados, para desenhar o losango do piso. */
+export function roomQuad(slot) {
+  const r = roomTiles(slot);
+  return [
+    iso(r.wx, r.wy, r.floor),
+    iso(r.wx + r.w, r.wy, r.floor),
+    iso(r.wx + r.w, r.wy + r.d, r.floor),
+    iso(r.wx, r.wy + r.d, r.floor),
+  ];
+}
+
+/** Caixa de tela que contém o cômodo inteiro — o que o enquadramento usa. */
+export function roomRect(slot) {
+  const q = roomQuad(slot);
+  const xs = q.map((p) => p.x), ys = q.map((p) => p.y);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y, cx: (x + Math.max(...xs)) / 2 };
+}
+
+/** Caixa de tela de um andar inteiro: a plataforma mais a altura de pé-direito. */
+export function floorRect(floor) {
+  const pl = floor === GROUND_FLOOR ? GROUND_PLATE : PLATE;
+  const corners = [iso(0, 0, floor), iso(pl.x, 0, floor), iso(pl.x, pl.y, floor), iso(0, pl.y, floor)];
+  const xs = corners.map((p) => p.x), ys = corners.map((p) => p.y);
+  const x = Math.min(...xs) - 20, y = Math.min(...ys) - 96;   // 96 = parede do fundo
+  return { x, y, w: Math.max(...xs) - x + 20, h: Math.max(...ys) - y + 24 };
+}
+
+/** O prédio inteiro como está agora: do topo do último andar à base do térreo. */
 export function buildingRect(scene) {
   const top = floorRect(floorCount(scene) - 1);
-  return { x: 0, y: top.y, w: PLAN.w, h: PLAN.h - top.y };
+  const base = floorRect(GROUND_FLOOR);
+  const x = Math.min(top.x, base.x);
+  const w = Math.max(top.x + top.w, base.x + base.w) - x;
+  return { x, y: top.y, w, h: base.y + base.h - top.y };
 }
 
 /** Quantos andares o prédio tem agora. Deriva da ocupação: andar vazio some. */
@@ -92,63 +130,76 @@ export function floorCount(scene) {
   return max + 1;
 }
 
-/** O poço inteiro, do teto do último andar até a laje do térreo. */
+/** O poço, do último andar até o térreo, em caixa de tela. */
 export function shaftRect(scene) {
-  const top = floorRect(floorCount(scene) - 1);
-  return { x: SHAFT.x, y: top.y, w: SHAFT.w, h: GROUND.y - top.y };
+  const top = iso(SHAFT.wx, SHAFT.wy, floorCount(scene) - 1);
+  const bottom = iso(SHAFT.wx + SHAFT.w, SHAFT.wy + SHAFT.d, GROUND_FLOOR);
+  return { x: top.x - TILE.w, y: top.y - 110, w: TILE.w * 2.4, h: bottom.y - top.y + 150 };
 }
 
-/** A cabine parada num andar. O térreo é o andar -1: o fundo do poço. */
+/**
+ * A cabine parada num andar, como caixa isométrica: os quatro cantos do piso
+ * dela mais a altura. O térreo é o andar -1 — o fundo do poço.
+ */
+export function cabinBox(floor) {
+  const { wx, wy, w, d } = SHAFT;
+  const h = 78;
+  return {
+    h,
+    floor: [iso(wx, wy, floor), iso(wx + w, wy, floor), iso(wx + w, wy + d, floor), iso(wx, wy + d, floor)],
+  };
+}
+
+/** Caixa de tela da cabine — o que o desenho e o teste usam para medir. */
 export function cabinRect(floor) {
-  const h = 74;
-  const y = floor < 0 ? GROUND.y - h - 4 : roomRect(floor * ROOMS_PER_FLOOR).y + 30;
-  return { x: SHAFT.x + 8, y, w: SHAFT.w - 16, h };
+  const b = cabinBox(floor);
+  const xs = b.floor.map((p) => p.x), ys = b.floor.map((p) => p.y);
+  const x = Math.min(...xs), y = Math.min(...ys) - b.h;
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
 
 /** Onde o robô fica em pé dentro da cabine, no andar dado. */
 export function cabinStand(floor) {
-  const c = cabinRect(floor);
-  return { x: c.x + c.w / 2, y: c.y + c.h - 14 };
+  return iso(SHAFT.wx + SHAFT.w / 2, SHAFT.wy + SHAFT.d / 2 + 0.2, floor);
 }
 
-/** Onde o robô fica parado no cômodo: centro, junto à base (perto do elevador). */
+/** Onde o robô fica parado no cômodo: no meio, um pouco à frente. */
 function roomHome(slot) {
-  const r = roomRect(slot);
-  return { x: r.cx, y: r.y + r.h - 46 };
+  const r = roomTiles(slot);
+  return iso(r.wx + r.w / 2, r.wy + r.d * 0.62, r.floor);
 }
 
-/** Posição do n-ésimo móvel dentro de um cômodo. Grade de duas colunas. */
-function propSlot(r, n) {
+/**
+ * Posição do n-ésimo móvel dentro de um cômodo. Os móveis encostam na parede
+ * do fundo e avançam em duas fileiras — como as baias da referência.
+ */
+function propSlot(slot, n) {
+  const r = roomTiles(slot);
   const col = n % 2;
   const row = Math.floor(n / 2);
-  return {
-    x: r.cx + (col === 0 ? -40 : 40),
-    // Presa ao cômodo: com muitos móveis a coluna empilha até a base e para,
-    // para nenhum móvel escapar do cômodo do dono.
-    y: Math.min(r.y + 78 + row * 58, r.y + r.h - 70),
-  };
+  return iso(
+    r.wx + r.w * (col === 0 ? 0.3 : 0.72),
+    // Preso ao cômodo: com muitos móveis a fileira empilha até a frente e para.
+    Math.min(r.wy + 0.7 + row * 1.15, r.wy + r.d - 0.7),
+    r.floor,
+  );
 }
 
-/** Onde o robô encosta para usar um móvel do próprio cômodo. */
+/** Onde o robô encosta para usar um móvel do próprio cômodo: logo à frente. */
 function standAt(prop, slot) {
-  const r = roomRect(slot);
-  return {
-    x: Math.max(r.x + 18, Math.min(prop.x, r.x + r.w - 18)),
-    y: Math.min(prop.y + 44, r.y + r.h - 40),
-  };
+  const r = roomTiles(slot);
+  const q = roomQuad(slot);
+  const y = Math.min(prop.y + 34, Math.max(q[2].y, q[3].y) - 8);
+  return { x: prop.x, y };
 }
 
 // Onde o robô fica em pé no térreo para usar uma estação (issue #9). Ele desce
 // de elevador até aqui; `rank` desempata quem está na mesma estação ao mesmo
 // tempo, para dois robôs não se sobreporem sobre o mesmo símbolo.
-const STATION_STAND_Y = GROUND.y + 40;
 export function stationStand(station, rank = 0) {
   const side = rank % 2 === 0 ? 1 : -1;
-  const spread = Math.ceil(rank / 2) * 34;
-  return {
-    x: Math.max(20, Math.min(station.x + side * spread, PLAN.w - 20)),
-    y: STATION_STAND_Y,
-  };
+  const spread = Math.ceil(rank / 2) * 1.1;   // um ladrilho inteiro entre dois robôs
+  return iso(station.wx + side * spread, station.wy + 0.9, GROUND_FLOOR);
 }
 
 export function createScene() {
@@ -205,13 +256,17 @@ function relocateAgent(scene, agent, cmds) {
   agent.y = home.y;
   cmds.push({ op: 'agent-move', id: agent.id, x: home.x, y: home.y, face: agent.face });
 
-  const dy = roomRect(dst).y - roomRect(from).y;
+  // Os móveis vão junto: reocupam as mesmas vagas, agora no cômodo novo. Em
+  // isométrico não dá para somar um deslocamento — a vaga é que é a verdade.
+  let n = 0;
   for (const p of scene.props.values()) {
-    if (p.owner === agent.id) {
-      p.y += dy;
-      cmds.push({ op: 'prop-move', prop: p });
-    }
+    if (p.owner !== agent.id || p.fixed) continue;
+    const spot = propSlot(dst, n++);
+    p.x = spot.x;
+    p.y = spot.y;
+    cmds.push({ op: 'prop-move', prop: p });
   }
+  agent.deskCursor = n;
 }
 
 /** A porta por onde um filho recém-convocado entra: o cômodo do pai, se ele
@@ -278,9 +333,10 @@ function ensureProp(scene, agent, seed, cmds) {
   if (!p) {
     let pos;
     if (station) {
-      pos = { x: station.x, y: station.y, room: station.label, fixed: true, owner: null };
+      // wx/wy vão junto: é deles que sai onde o robô fica em pé na estação.
+      pos = { x: station.x, y: station.y, wx: station.wx, wy: station.wy, room: station.label, fixed: true, owner: null };
     } else {
-      const s = propSlot(roomRect(agent.room), agent.deskCursor++);
+      const s = propSlot(agent.room, agent.deskCursor++);
       pos = { x: s.x, y: s.y, room: 'CÔMODO', fixed: false, owner: agent.id };
     }
     p = { ...seed, key, ...pos, uses: 0, born: Date.now() };
@@ -305,9 +361,8 @@ function moveTo(scene, a, x, y, cmds, extra) {
  * renderizador encadeia as duas — é isso que faz o elevador ser visível em vez
  * de o robô cortar caminho na diagonal.
  */
-function elevatorTo(scene, a, x, y, cmds) {
+function elevatorTo(scene, a, x, y, cmds, goingDown) {
   const floor = Math.floor(a.room / ROOMS_PER_FLOOR);
-  const goingDown = y >= GROUND.y;
   const board = cabinStand(goingDown ? floor : -1);
   const land = cabinStand(goingDown ? -1 : floor);
 
@@ -329,7 +384,7 @@ function returnHome(scene, a, cmds, status = 'idle') {
   a.away = false;
   a.since = Date.now();
   const home = roomHome(a.room);
-  if (wasAway) elevatorTo(scene, a, home.x, home.y, cmds);
+  if (wasAway) elevatorTo(scene, a, home.x, home.y, cmds, false);
   else moveTo(scene, a, home.x, home.y, cmds);
   cmds.push({ op: 'agent-state', agent: a });
 }
@@ -392,7 +447,7 @@ export function apply(scene, ev) {
         const rank = [...scene.agents.values()].filter((o) => o !== a && o.away && o.propKey === p.key).length;
         const spot = stationStand(p, rank);
         a.away = true;
-        elevatorTo(scene, a, spot.x, spot.y, cmds);
+        elevatorTo(scene, a, spot.x, spot.y, cmds, true);
       } else {
         a.away = false;
         const spot = standAt(p, a.room);

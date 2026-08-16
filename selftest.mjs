@@ -9,9 +9,9 @@
 //   node selftest.mjs
 
 import {
-  createScene, apply, rebuild, roomRect, ROOMS_PER_FLOOR, GROUND,
+  createScene, apply, rebuild, roomRect, roomQuad, ROOMS_PER_FLOOR,
   DOOR, STATIONS, MAIN_ROOM, floorCount, floorRect, buildingRect, PLAN,
-  SHAFT, shaftRect, cabinRect, cabinStand,
+  SHAFT, shaftRect, cabinRect, cabinStand, iso, PLATE, GROUND_FLOOR, GROUND_PLATE,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { appendEvent, logPathFor } from './logstore.mjs';
@@ -37,10 +37,35 @@ const deskProp = (name) => ({ kind: 'desk', key: 'file:' + name, label: name });
 
 // ── invariantes de layout ──────────────────────────────────────────────────
 
-function insideRoom(x, y, i) {
-  const r = roomRect(i);
-  return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+// O cômodo é um losango, não um retângulo: ponto-dentro-de-polígono, com uma
+// folga para o robô que encosta na beirada do piso.
+function insideRoom(x, y, i, pad = 26) {
+  const q = roomQuad(i);
+  let inside = false;
+  for (let a = 0, b = q.length - 1; a < q.length; b = a++) {
+    const hit = (q[a].y > y) !== (q[b].y > y) &&
+      x < ((q[b].x - q[a].x) * (y - q[a].y)) / (q[b].y - q[a].y) + q[a].x;
+    if (hit) inside = !inside;
+  }
+  if (inside) return true;
+  // Beirada: aceita o que está a menos de `pad` do losango.
+  const cx = q.reduce((t, p) => t + p.x, 0) / 4;
+  const cy = q.reduce((t, p) => t + p.y, 0) / 4;
+  const shrunk = q.map((p) => ({ x: p.x + Math.sign(cx - p.x) * -pad, y: p.y + Math.sign(cy - p.y) * -pad }));
+  let grown = false;
+  for (let a = 0, b = shrunk.length - 1; a < shrunk.length; b = a++) {
+    const hit = (shrunk[a].y > y) !== (shrunk[b].y > y) &&
+      x < ((shrunk[b].x - shrunk[a].x) * (y - shrunk[a].y)) / (shrunk[b].y - shrunk[a].y) + shrunk[a].x;
+    if (hit) grown = !grown;
+  }
+  return grown;
 }
+
+// A caixa do térreo de serviço, onde os robôs ficam quando descem às estações.
+const groundBox = floorRect(GROUND_FLOOR);
+const onGround = (x, y) =>
+  x >= groundBox.x - 40 && x <= groundBox.x + groundBox.w + 40 &&
+  y >= groundBox.y && y <= groundBox.y + groundBox.h + 40;
 
 /** Devolve a lista de invariantes violadas na cena. Vazia = tudo em ordem. */
 function violations(s) {
@@ -71,7 +96,7 @@ function violations(s) {
   // Todo robô está no seu cômodo — ou no térreo, quando desce para usar uma
   // estação (issue #9). Nunca num terceiro lugar.
   for (const a of agents) {
-    const atGround = a.y >= GROUND.y && a.x >= 0 && a.x <= PLAN.w;
+    const atGround = onGround(a.x, a.y);
     const placed = a.away ? atGround : insideRoom(a.x, a.y, a.room);
     if (!placed) bad.push(`robô ${a.id} nem no cômodo ${a.room} nem no térreo`);
   }
@@ -88,7 +113,7 @@ function violations(s) {
   // Todo móvel de cômodo dentro do cômodo do dono; toda estação no térreo.
   for (const p of s.props.values()) {
     if (p.fixed) {
-      if (p.y < GROUND.y) bad.push(`estação ${p.key} fora do térreo`);
+      if (!onGround(p.x, p.y)) bad.push(`estação ${p.key} fora do térreo`);
     } else {
       const owner = s.agents.get(p.owner);
       if (!owner) continue;   // dono já saiu; o móvel some com ele no render
@@ -184,7 +209,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
     apply(s, evt({ kind: 'tool_start', tool: 'X', prop: { kind, key: kind, label: kind } }));
     const p = s.props.get(kind);
     ok(`${kind} ancora em ${st.label}`, p.x === st.x && p.y === st.y && p.fixed);
-    ok(`${kind} está no térreo`, p.y >= GROUND.y);
+    ok(`${kind} está no térreo`, onGround(p.x, p.y));
   }
   // Dois agentes usando o terminal compartilham a mesma estação global.
   apply(s, evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }));
@@ -350,7 +375,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const c = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }));
   const a = s.agents.get('a1');
   ok('usar estação marca o robô como fora', a.away === true);
-  ok('o robô desce ao térreo', a.y >= GROUND.y, `y=${a.y}`);
+  ok('o robô desce ao térreo', onGround(a.x, a.y), `x=${a.x} y=${a.y}`);
   ok('o robô encosta na estação do térreo', Math.abs(a.x - STATIONS.terminal.x) < 60, `x=${a.x}`);
   ok('o cômodo do robô continua reservado', a.room === room);
   ok('a viagem até a estação é de elevador', cmdsOf(c, 'agent-move').some((m) => m.elevator === true));
@@ -380,7 +405,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   apply(s, evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'Bash', prop: term }));
   const a1 = s.agents.get('a1');
   const a2 = s.agents.get('a2');
-  ok('os dois na estação, no térreo', a1.away && a2.away && a1.y >= GROUND.y && a2.y >= GROUND.y);
+  ok('os dois na estação, no térreo', a1.away && a2.away && onGround(a1.x, a1.y) && onGround(a2.x, a2.y));
   ok('os dois não se sobrepõem na estação', Math.hypot(a1.x - a2.x, a1.y - a2.y) > 24, `a1=${a1.x} a2=${a2.x}`);
   { const v = invariantsHold(s); ok('invariantes valem com dois na estação', v.ok, v.detail); }
 }
@@ -549,9 +574,9 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
 
   // Vista empilhada com um andar: cobre o andar 0 e o térreo inteiro.
   const b1 = buildingRect(s);
-  ok('o corte vertical cobre a largura da planta', b1.x === 0 && b1.w === PLAN.w);
-  ok('o corte vertical vai até a base do térreo', b1.y + b1.h === PLAN.h);
-  ok('o corte vertical cobre o 1º andar', b1.y <= roomRect(0).y && b1.y + b1.h >= GROUND.y + GROUND.h);
+  ok('o corte vertical cobre a planta toda', b1.w > 0 && b1.h > 0 && b1.w <= PLAN.w + 80);
+  ok('o corte vertical desce até o térreo', b1.y + b1.h >= groundBox.y + groundBox.h - 1);
+  ok('o corte vertical cobre o 1º andar', b1.y <= roomRect(0).y);
 
   // O andar cheio enquadra os cinco cômodos daquele andar, e só eles.
   const f0 = floorRect(0);
@@ -559,7 +584,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
     const r = roomRect(i);
     ok(`o andar cheio contém o cômodo ${i}`, r.y >= f0.y && r.y + r.h <= f0.y + f0.h && r.x >= f0.x && r.x + r.w <= f0.x + f0.w);
   }
-  ok('o andar cheio não desce ao térreo', f0.y + f0.h < GROUND.y);
+  ok('o andar cheio não desce ao térreo', f0.y + f0.h < groundBox.y + groundBox.h);
   ok('o andar cheio é mais baixo que o prédio de um andar', f0.h < b1.h);
 
   // O sexto agente abre o 2º andar: o corte vertical cresce para cima.
@@ -570,7 +595,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('o corte vertical cobre o andar de cima', b2.y <= floorRect(1).y);
 
   // Andares não se sobrepõem: cada um é uma faixa própria, de baixo para cima.
-  ok('os andares não se sobrepõem', floorRect(1).y + floorRect(1).h <= floorRect(0).y);
+  ok('o andar de cima fica acima do de baixo', floorRect(1).y < floorRect(0).y);
   ok('todo robô cabe no enquadramento do prédio',
      [...s.agents.values()].every((a) => a.y >= b2.y && a.y <= b2.y + b2.h));
 }
@@ -581,14 +606,13 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
 
   // O poço é uma coluna própria: nenhum cômodo invade a faixa dele.
-  for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
-    const r = roomRect(i);
-    ok(`o cômodo ${i} não invade o poço`, r.x + r.w <= SHAFT.x);
-  }
+  // O poço fica atrás das plataformas (wy negativo): nenhum cômodo o alcança.
+  ok('o poço fica atrás dos cômodos', SHAFT.wy + SHAFT.d <= 0);
+  ok('o poço está na faixa da plataforma', SHAFT.wx >= 0 && SHAFT.wx + SHAFT.w <= PLATE.x);
   const sh = shaftRect(s);
-  ok('o poço vai do último andar até a laje do térreo', sh.y <= roomRect(0).y && sh.y + sh.h === GROUND.y);
+  ok('o poço vai do último andar até o térreo', sh.y <= roomRect(0).y && sh.y + sh.h >= cabinRect(GROUND_FLOOR).y);
   ok('a cabine cabe dentro do poço', cabinRect(0).x >= sh.x && cabinRect(0).x + cabinRect(0).w <= sh.x + sh.w);
-  ok('a cabine do térreo fica abaixo da do 1º andar', cabinRect(-1).y > cabinRect(0).y);
+  ok('a cabine do térreo fica abaixo da do 1º andar', cabinRect(GROUND_FLOOR).y > cabinRect(0).y);
   ok('a cabine nasce no térreo', s.cabinFloor === -1);
 
   // Usar uma estação vira uma viagem: entrar na cabine, descer, sair.

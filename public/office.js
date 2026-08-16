@@ -5,15 +5,16 @@
 
 import { animate, stagger } from './vendor/motion.js';
 import {
-  createScene, apply, rebuild, PLAN, DOOR, STATIONS, GROUND, FLOOR, ROOMS_PER_FLOOR,
-  roomRect, floorRect, buildingRect, floorCount, SHAFT, shaftRect, cabinRect,
+  createScene, apply, rebuild, PLAN, DOOR, STATIONS, ROOMS_PER_FLOOR,
+  roomRect, roomQuad, floorRect, buildingRect, floorCount, depth,
+  SHAFT, shaftRect, cabinRect, cabinBox, iso, TILE, PLATE, GROUND_FLOOR, GROUND_PLATE,
 } from './scene.mjs';
 
 const params = new URLSearchParams(location.search);
 
 // Carimbo do desenho carregado. Suba isto quando o desenho mudar de forma —
 // é o que distingue "não mudou" de "o navegador está com o arquivo velho".
-const BUILD = '2.5d · poço · robô-foto';
+const BUILD = 'isométrico · minimal';
 
 // `instant` despeja o roteiro de uma vez; sem cortar as animações, o resultado
 // seria um congelado com todo mundo no meio do caminho.
@@ -21,8 +22,12 @@ const STILL = params.has('instant') || matchMedia('(prefers-reduced-motion: redu
 const REDUCED = STILL;
 
 // Springs: a mesma massa para todo mundo, para a cena ter um "peso" coerente.
-const WALK = STILL ? { duration: 0 } : { type: 'spring', stiffness: 42, damping: 15, mass: 1.1 };
-const POP = STILL ? { duration: 0 } : { type: 'spring', stiffness: 320, damping: 24 };
+// Ritmo do prédio. O robô é uma máquina pesada de esteira, não um cursor: ele
+// arranca devagar e assenta no destino. Rígido demais e a cena vira pisca-pisca
+// — a sessão real dispara ferramentas em rajada, e é a lentidão que deixa o
+// olho acompanhar quem foi para onde.
+const WALK = STILL ? { duration: 0 } : { type: 'spring', stiffness: 16, damping: 17, mass: 1.6 };
+const POP = STILL ? { duration: 0 } : { type: 'spring', stiffness: 180, damping: 20 };
 
 const el = (id) => document.getElementById(id);
 const $stage = el('stage');
@@ -66,154 +71,133 @@ const moodOf = (a) => (a.status === 'working' ? 'work' : a.status === 'error' ? 
 
 // ── a planta ──────────────────────────────────────────────────────────────
 
-// Desenha o prédio com `floors` andares empilhados sobre o térreo.
+// Desenha o prédio isométrico: uma plataforma de ladrilhos por andar, empilhadas
+// sobre o térreo de serviço. A geometria toda vem projetada do scene.mjs — aqui
+// só se decide traço, opacidade e ordem de desenho.
 //
-// Projeção oblíqua (a "isométrica de prancheta"): a face de frente fica no
-// plano da cena — é nela que os robôs e os móveis vivem, com as coordenadas
-// que o scene.mjs calcula — e o volume vem de duas faces auxiliares, o topo e
-// a lateral, deslocadas pelo vetor de profundidade. Nada que o scene.mjs
-// posiciona passa pela projeção: só a arquitetura ganha corpo.
-const DEPTH = { x: 30, y: -19 };
-const back = (x, y) => [x + DEPTH.x, y + DEPTH.y];
+// Minimalista de propósito: ladrilho é linha fina, parede é um plano só, e o
+// preenchimento existe apenas para separar piso de parede. Nada de textura.
+const NS = 'http://www.w3.org/2000/svg';
+const WALL_H = 96;                     // pé-direito desenhado atrás da plataforma
 
 function drawBlueprint(floors) {
   $blueprint.replaceChildren();
-  const ns = 'http://www.w3.org/2000/svg';
   const add = (tag, attrs, parent = $blueprint) => {
-    const n = document.createElementNS(ns, tag);
+    const n = document.createElementNS(NS, tag);
     for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
     parent.appendChild(n);
     return n;
   };
-  const line = (x1, y1, x2, y2, o = .55, w = 1) =>
-    add('path', { d: `M${x1} ${y1}L${x2} ${y2}`, stroke: 'var(--draft)', 'stroke-width': w, opacity: o });
-  const label = (x, y, text, o = .5) => {
+  const poly = (pts, attrs, parent = $blueprint) => add('path', { d: 'M' + pts.map((p) => `${p.x} ${p.y}`).join('L') + 'Z', ...attrs }, parent);
+  const line = (a, b, o = .5, w = 1) =>
+    add('path', { d: `M${a.x} ${a.y}L${b.x} ${b.y}`, stroke: 'var(--draft)', 'stroke-width': w, opacity: o });
+  const label = (at, text, o = .45, size = 10) => {
     const t = add('text', {
-      x, y, fill: 'var(--draft)', opacity: o,
-      'font-family': 'var(--mono)', 'font-size': 10, 'letter-spacing': 3.4, 'text-anchor': 'middle',
+      x: at.x, y: at.y, fill: 'var(--draft)', opacity: o,
+      'font-family': 'var(--mono)', 'font-size': size, 'letter-spacing': 2.6, 'text-anchor': 'middle',
     });
     t.textContent = text;
   };
-  // Face de profundidade: o mesmo retângulo empurrado para trás, fechado nos
-  // quatro cantos. É o que dá volume sem sair do azul de prancheta.
-  const slab = (x, y, w, h, fill = .07) => {
-    const [bx, by] = back(x, y);
-    add('path', {
-      d: `M${x} ${y}L${bx} ${by}L${bx + w} ${by}L${x + w} ${y}Z`,
-      fill: 'var(--draft)', stroke: 'var(--draft)', 'stroke-width': .6, 'fill-opacity': fill + .04, opacity: .5,
-    });
-    add('path', {
-      d: `M${x + w} ${y}L${bx + w} ${by}L${bx + w} ${by + h}L${x + w} ${y + h}Z`,
-      fill: 'var(--draft)', stroke: 'var(--draft)', 'stroke-width': .6, 'fill-opacity': fill, opacity: .45,
-    });
-  };
 
   // Gradiente arco-íris do agente principal. Vive aqui, no SVG da planta, mas a
-  // carcaça do robô o referencia por id de qualquer outro SVG do documento — é
-  // o mesmo matiz que o elenco e o registro pintam por CSS, para o principal se
-  // ler igual nos três lugares.
+  // carcaça do robô o referencia por id de qualquer outro SVG do documento.
   const defs = add('defs', {});
   const grad = add('linearGradient', { id: 'agentRainbow', x1: 0, y1: 0, x2: 1, y2: 1 }, defs);
-  const stops = [['0', 'hsl(0 80% 62%)'], ['.2', 'hsl(32 85% 60%)'], ['.4', 'hsl(52 85% 58%)'],
-                 ['.6', 'hsl(145 60% 52%)'], ['.8', 'hsl(210 70% 58%)'], ['1', 'hsl(280 60% 64%)']];
-  for (const [off, col] of stops) add('stop', { offset: off, 'stop-color': col }, grad);
-
-  const M = 24;                       // margem do desenho
-  const top = floorRect(floors - 1).y - 16;   // teto do último andar
-  const W = PLAN.w - M * 2;
-  const H = PLAN.h - M - top;
-
-  // Volume do prédio: o teto e a lateral direita, empurrados para trás.
-  slab(M, top, W, H, .03);
-
-  // parede externa: linha dupla, como em planta de verdade
-  add('rect', { x: M, y: top, width: W, height: H, fill: 'none', stroke: 'var(--draft)', 'stroke-width': 2, opacity: .55 });
-  add('rect', { x: M + 5, y: top + 5, width: W - 10, height: H - 10, fill: 'none', stroke: 'var(--draft)', 'stroke-width': .6, opacity: .3 });
-
-  // marcas de canto (registro de prancheta)
-  for (const [cx, cy, sx, sy] of [[M, top, 1, 1], [PLAN.w - M, top, -1, 1], [M, PLAN.h - M, 1, -1], [PLAN.w - M, PLAN.h - M, -1, -1]]) {
-    add('path', {
-      d: `M${cx} ${cy + sy * 20}L${cx} ${cy}L${cx + sx * 20} ${cy}`,
-      fill: 'none', stroke: 'var(--draft)', 'stroke-width': 1.6, opacity: .75,
-    });
+  for (const [off, col] of [['0', 'hsl(0 80% 62%)'], ['.2', 'hsl(32 85% 60%)'], ['.4', 'hsl(52 85% 58%)'],
+                            ['.6', 'hsl(145 60% 52%)'], ['.8', 'hsl(210 70% 58%)'], ['1', 'hsl(280 60% 64%)']]) {
+    add('stop', { offset: off, 'stop-color': col }, grad);
   }
 
-  // Um andar de cada vez, de baixo para cima: cinco cômodos separados por
-  // divisórias, o vão da porta no topo de cada um, e a laje que o sustenta.
-  const roomW = SHAFT.x / ROOMS_PER_FLOOR;
-  for (let f = 0; f < floors; f++) {
-    const fr = floorRect(f);
-    const ceiling = fr.y + 6;                     // topo dos cômodos deste andar
-    const base = ceiling + roomRect(0).h;         // piso deste andar
-    for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
-      if (i > 0) line(i * roomW, ceiling, i * roomW, base, .3, 1);
-      const r = roomRect(f * ROOMS_PER_FLOOR + i);
-      // vão da porta, sugerido no topo do cômodo
-      add('rect', { x: r.cx - 20, y: ceiling - 2, width: 40, height: 4, fill: 'var(--ink)' });
-      line(r.cx - 20, ceiling, r.cx - 20, ceiling + 14, .35, 1);
-      line(r.cx + 20, ceiling, r.cx + 20, ceiling + 14, .35, 1);
-    }
-    // A laje entre este andar e o de baixo tem espessura: é ela que se lê como
-    // "andar" quando o prédio é olhado de lado.
-    slab(M, base + 3, W, 8, .06);
-    line(M, base + 3, PLAN.w - M, base + 3, .5, 1.6);
-    line(M, base + 11, PLAN.w - M, base + 11, .3, 1);
-    label(SHAFT.x / 2, ceiling - 12, `${f + 1}º ANDAR`, .38);
-  }
+  // Uma plataforma: as duas paredes do fundo, o piso ladrilhado e a espessura
+  // da laje. Desenhada de trás para a frente, que é a ordem que se sobrepõe.
+  const platform = (floor, tx, ty, opts = {}) => {
+    const c = { back: iso(0, 0, floor), right: iso(tx, 0, floor), front: iso(tx, ty, floor), left: iso(0, ty, floor) };
+
+    // paredes: dois planos verticais, subindo do fundo
+    const up = (p) => ({ x: p.x, y: p.y - WALL_H });
+    poly([c.left, c.back, up(c.back), up(c.left)], { fill: 'var(--wall)', stroke: 'var(--draft)', 'stroke-width': .8, opacity: .9 });
+    poly([c.back, c.right, up(c.right), up(c.back)], { fill: 'var(--wall-2)', stroke: 'var(--draft)', 'stroke-width': .8, opacity: .9 });
+
+    // piso
+    poly([c.back, c.right, c.front, c.left], { fill: 'var(--floor)', stroke: 'var(--draft)', 'stroke-width': 1.1, opacity: .95 });
+
+    // ladrilhos: as duas famílias de linhas do losango
+    for (let i = 1; i < tx; i++) line(iso(i, 0, floor), iso(i, ty, floor), .1);
+    for (let j = 1; j < ty; j++) line(iso(0, j, floor), iso(tx, j, floor), .1);
+
+    // espessura da laje: o que dá o degrau entre um andar e o de baixo
+    const drop = (p) => ({ x: p.x, y: p.y + 14 });
+    poly([c.left, c.front, drop(c.front), drop(c.left)], { fill: 'var(--slab)', stroke: 'var(--draft)', 'stroke-width': .8, opacity: .95 });
+    poly([c.front, c.right, drop(c.right), drop(c.front)], { fill: 'var(--slab-2)', stroke: 'var(--draft)', 'stroke-width': .8, opacity: .95 });
+
+    if (opts.label) label(up(iso(tx / 2, 0, floor)), opts.label, .4);
+    return c;
+  };
 
   // ── o poço do elevador ──────────────────────────────────────────────────
-  // Coluna própria, atravessando os andares até o térreo. A cabine é desenhada
-  // depois, fora do redesenho, porque ela se move.
-  const sh = shaftRect(scene);
-  slab(sh.x, sh.y, sh.w, sh.h, .04);
-  add('rect', {
-    x: sh.x, y: sh.y, width: sh.w, height: sh.h,
-    fill: 'var(--ink)', stroke: 'var(--draft)', 'stroke-width': 1.2, opacity: .9,
-  });
-  // guias do poço e as marcas de parada de cada andar
-  line(sh.x + 12, sh.y, sh.x + 12, sh.y + sh.h, .3, 1);
-  line(sh.x + sh.w - 12, sh.y, sh.x + sh.w - 12, sh.y + sh.h, .3, 1);
-  for (let f = 0; f < floors; f++) {
-    const c = cabinRect(f);
-    line(sh.x + 4, c.y + c.h, sh.x + sh.w - 4, c.y + c.h, .28, 1);
-  }
-  const cap = add('text', {
-    x: sh.x + sh.w / 2, y: sh.y + 12, fill: 'var(--draft)', opacity: .5,
-    'font-family': 'var(--mono)', 'font-size': 9, 'letter-spacing': 3, 'text-anchor': 'middle',
-  });
-  cap.textContent = 'ELEVADOR';
+  // Desenhado antes das plataformas: ele passa por trás do prédio, e é o que
+  // faz a cabine parecer correr dentro da estrutura em vez de sobre ela.
+  const shaftRails = (floors_) => {
+    const topF = floors_ - 1;
+    const a = iso(SHAFT.wx, SHAFT.wy, topF);
+    const b = iso(SHAFT.wx + SHAFT.w, SHAFT.wy, topF);
+    const c = iso(SHAFT.wx + SHAFT.w, SHAFT.wy, GROUND_FLOOR);
+    const d2 = iso(SHAFT.wx, SHAFT.wy, GROUND_FLOOR);
+    poly([{ x: a.x, y: a.y - WALL_H }, { x: b.x, y: b.y - WALL_H }, c, d2],
+         { fill: 'var(--wall-2)', 'fill-opacity': .7, stroke: 'var(--draft)', 'stroke-width': 1, opacity: .45 });
+    label({ x: (a.x + b.x) / 2, y: a.y - WALL_H - 12 }, 'ELEVADOR', .4, 8);
+  };
+  shaftRails(floors);
 
-  // A cabine: vive no SVG da planta e é movida pela motion, andar a andar.
-  const cab = cabinRect(-1);
-  $cabin = add('g', { class: 'cabin' });
-  add('rect', {
-    x: cab.x, y: cab.y, width: cab.w, height: cab.h, rx: 2,
-    fill: 'var(--ink)', stroke: 'var(--draft)', 'stroke-width': 1.4, opacity: 1,
-  }, $cabin);
-  add('path', {
-    d: `M${cab.x + cab.w / 2} ${cab.y + 6}v${cab.h - 12}`,
-    stroke: 'var(--draft)', 'stroke-width': .8, opacity: .5,
-  }, $cabin);   // as duas folhas da porta
-  cabinAt = -1;
+  // Térreo de serviço primeiro: ele fica atrás e embaixo de tudo.
+  platform(GROUND_FLOOR, GROUND_PLATE.x, GROUND_PLATE.y, { label: 'TÉRREO DE SERVIÇO' });
 
-  // térreo de serviço: porta do prédio e as quatro estações
+  // A porta do prédio, na quina de quem chega de fora.
   const d = DOOR;
-  slab(M, GROUND.y, W, GROUND.h - M, .06);
-  line(M, GROUND.y, PLAN.w - M, GROUND.y, .5, 2);
-  add('rect', { x: M - 3, y: d.y - 30, width: 11, height: 60, fill: 'var(--ink)' });
   add('path', {
-    d: `M${M + 8} ${d.y + 26}A56 56 0 0 0 ${M + 64} ${d.y - 30}`,
-    fill: 'none', stroke: 'var(--draft)', 'stroke-width': .9, 'stroke-dasharray': '3 4', opacity: .6,
+    d: `M${d.x - 16} ${d.y}l16 -8 16 8`, fill: 'none',
+    stroke: 'var(--draft)', 'stroke-width': 1.2, opacity: .6, 'stroke-dasharray': '3 4',
   });
-  for (const s of Object.values(STATIONS)) label(s.x, GROUND.y + GROUND.h - 16, s.label, .5);
-  label(SHAFT.x - 96, GROUND.y + 18, 'TÉRREO DE SERVIÇO', .32);
+  label({ x: d.x, y: d.y + 22 }, 'PORTA', .34, 8);
+
+  // As quatro estações, no chão do térreo: um losango marcado e o nome.
+  for (const st of Object.values(STATIONS)) {
+    const q = [iso(st.wx - .6, st.wy - .6, GROUND_FLOOR), iso(st.wx + .6, st.wy - .6, GROUND_FLOOR),
+               iso(st.wx + .6, st.wy + .6, GROUND_FLOOR), iso(st.wx - .6, st.wy + .6, GROUND_FLOOR)];
+    poly(q, { fill: 'var(--draft)', 'fill-opacity': .07, stroke: 'var(--draft)', 'stroke-width': .9, opacity: .55 });
+  }
+
+  // Os andares, de baixo para cima.
+  for (let f = 0; f < floors; f++) {
+    platform(f, PLATE.x, PLATE.y, { label: `${f + 1}º ANDAR` });
+
+    // divisórias entre os cinco cômodos: uma linha só, do fundo à frente
+    for (let i = 1; i < ROOMS_PER_FLOOR; i++) {
+      const wx = (PLATE.x / ROOMS_PER_FLOOR) * i;
+      line(iso(wx, 0, f), iso(wx, PLATE.y, f), .26, 1);
+    }
+  }
+
+  // A cabine por último: ela corre dentro do poço, mas tem de ser vista. Caixa
+  // isométrica como o resto do prédio — um retângulo chapado aqui saltaria aos
+  // olhos como erro de desenho.
+  const box = cabinBox(GROUND_FLOOR);
+  const [bk, rt, ft, lf] = box.floor;
+  const up = (p) => ({ x: p.x, y: p.y - box.h });
+  $cabin = add('g', { class: 'cabin' });
+  poly([lf, ft, up(ft), up(lf)], { fill: 'var(--ink)', stroke: 'var(--draft)', 'stroke-width': 1.1, opacity: .95 }, $cabin);
+  poly([ft, rt, up(rt), up(ft)], { fill: 'var(--slab-2)', stroke: 'var(--draft)', 'stroke-width': 1.1, opacity: .95 }, $cabin);
+  poly([up(bk), up(rt), up(ft), up(lf)], { fill: 'var(--slab)', stroke: 'var(--draft)', 'stroke-width': 1, opacity: .95 }, $cabin);
+  add('path', { d: `M${ft.x} ${ft.y}L${ft.x} ${ft.y - box.h}`, stroke: 'var(--draft)', 'stroke-width': .8, opacity: .5 }, $cabin);
+  cabinAt = GROUND_FLOOR;
 }
+
 
 // Leva a cabine ao andar pedido (-1 é o térreo). O robô viaja junto: a perna
 // `ride` do trajeto dele tem a mesma duração.
 let $cabin = null;
 let cabinAt = -1;
-const RIDE = { duration: 0.62, ease: [0.32, 0, 0.2, 1] };
+const RIDE = { duration: 1.5, ease: [0.4, 0, 0.2, 1] };   // a cabine é lenta, como elevador de verdade
 
 function moveCabin(floor) {
   if (!$cabin || floor === cabinAt) return;
@@ -366,7 +350,9 @@ function mountAgent(agent, instant, cmd) {
   // Quem fala fica acima de quem só trabalha, e balões de agentes diferentes
   // se escalonam em altura para não se cobrirem quando todos falam juntos.
   node.style.setProperty('--lift', (nodes.size % 3) * 48 + 'px');
-  node.style.zIndex = String(10 + nodes.size);
+  // Em isométrico a ordem de desenho é a profundidade: o robô mais à frente
+  // (y de tela maior) tapa quem está atrás dele.
+  node.style.zIndex = String(1000 + Math.round(agent.y));
   $agents.appendChild(node);
 
   const rec = { root: node, tool: node.querySelector('.agent-tool'), bubbleTimer: 0, chain: Promise.resolve() };
@@ -404,6 +390,7 @@ function walkAgent(id, x, y, face, elevator, instant, leg) {
     // de destino no meio do caminho não dá solavanco. A descida na cabine é
     // outra coisa: tempo fixo, igual ao da cabine, para os dois irem juntos.
     const opts = leg === 'ride' ? (STILL ? { duration: 0 } : RIDE) : WALK;
+      rec.root.style.zIndex = String(1000 + Math.round(y));
     const anim = animate(rec.root, { x, y }, opts);
     return anim.finished
       .then(() => { rec.root.classList.remove('walking', 'riding'); })
@@ -504,6 +491,7 @@ function renderDoors() {
   $doors.replaceChildren();
   for (const a of scene.agents.values()) {
     if (a.room == null) continue;
+    const q = roomQuad(a.room);
     const r = roomRect(a.room);
     const plate = document.createElement('div');
     plate.className = 'door-plate';
@@ -511,9 +499,10 @@ function renderDoors() {
     if (a.isMain) plate.dataset.main = '';
     if (a.status === 'leaving') plate.dataset.leaving = '';
     plate.textContent = a.isMain ? 'principal' : a.type;
-    plate.style.left = r.cx + 'px';
-    // A plaqueta acompanha o andar do cômodo, não o topo fixo do 1º andar.
-    plate.style.top = r.y + 'px';
+    // No canto esquerdo do cômodo, rente ao piso: em isométrico o alto da parede
+    // do fundo cai por cima do andar de cima, e as plaquetas se atropelavam.
+    plate.style.left = (q[3].x + 34) + 'px';
+    plate.style.top = (q[3].y - 12) + 'px';
     $doors.appendChild(plate);
 
     // O dono desceu ao térreo para usar uma estação (issue #9): o cômodo fica
@@ -526,7 +515,7 @@ function renderDoors() {
       mark.style.setProperty('--h', hueOf(a));
       if (a.isMain) mark.dataset.main = '';
       mark.style.left = r.cx + 'px';
-      mark.style.top = (r.y + r.h / 2) + 'px';
+      mark.style.top = (r.y + r.h * 0.55) + 'px';
       mark.textContent = 'ocupado · fora';
       $doors.appendChild(mark);
     }

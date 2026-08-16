@@ -37,6 +37,16 @@ A vista de um andar só, enquadrado na tela inteira, com o resto do prédio sob
 um véu. Aberta ao clicar num andar; `esc` volta ao corte vertical.
 _Avoid_: tela cheia (é do navegador), foco, modal
 
+**Plataforma**:
+O piso de um andar, desenhado como losango ladrilhado. O que se empilha para
+formar o prédio.
+_Avoid_: laje (é a espessura), tabuleiro, grid
+
+**Ladrilho**:
+A unidade do mundo isométrico. Posição de agente e de móvel se pensa em
+ladrilhos; pixel é coisa do renderizador.
+_Avoid_: célula, tile, quadrado
+
 **Poço**:
 A coluna do elevador, à direita da planta, atravessando todos os andares até o
 térreo. Não é cômodo e não conta agente.

@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `motion.dev` está vendorizada em
 `public/vendor/motion.js` como bundle fechado.
 
 ```
-node selftest.mjs        # 143 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 140 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -41,8 +41,11 @@ parece bug de layout e não é:
 
 ```
 chrome --headless=new --screenshot=shot.png --window-size=1500,860 \
-  --virtual-time-budget=2500 "http://127.0.0.1:4517/?demo&instant&upto=21"
+  --virtual-time-budget=12000 "http://127.0.0.1:4517/?demo&instant&upto=21"
 ```
+
+O orçamento de 12 s não é folga: com o ritmo lento e a viagem em três pernas, um
+print de 3 s pega os robôs no meio do caminho e parece bug de posicionamento.
 
 O `upto=21` para o roteiro com seis agentes vivos — é onde o 2º andar existe. O
 print não clica, então a vista de andar cheio se pede pela URL: `&floor=1` abre
@@ -72,20 +75,36 @@ Três lugares, nesta ordem:
 3. `public/office.js` → `SYMBOL`, o desenho em símbolo de planta, e `VERB`, o
    verbo em português que aparece no registro.
 
-## A projeção e o elevador
+## O mundo isométrico
 
-O prédio é desenhado em **projeção oblíqua**: a face de frente fica no plano da
-cena — é nela que robôs e móveis vivem, com as coordenadas cruas do
-`scene.mjs` — e o volume vem de duas faces auxiliares (topo e lateral)
-deslocadas pelo vetor `DEPTH` do `office.js`. Nada que o `scene.mjs` posiciona
-passa pela projeção; só a arquitetura ganha corpo. Por isso o `selftest`
-continua valendo: ele afirma sobre o plano da frente.
+A referência é `media-agents/escriotorio1.png`: plataformas em losango
+empilhadas, piso ladrilhado, duas paredes por andar. O `scene.mjs` raciocina em
+**coordenadas de mundo** — `(wx, wy)` em ladrilhos sobre a plataforma, mais o
+andar — e projeta com `iso()`. Todo comando sai já em pixel, então o
+renderizador continua sem geometria própria.
 
-O **poço do elevador** é uma coluna própria à direita (`SHAFT`), fora da conta
-dos cômodos — `ROOM_W` deriva de `SHAFT.x`, não da largura da planta. A viagem
-até uma estação sai em três pernas (`leg: board | ride | off`), e o
-renderizador as encadeia por promessa: sem o encadeamento a motion troca o
-destino no meio e o robô volta a cortar caminho na diagonal.
+Consequências que já morderam:
+
+- **Cômodo é losango, não retângulo.** `roomRect` existe só para enquadramento;
+  quem testa contenção usa `roomQuad` com ponto-dentro-de-polígono.
+- **Deslocar não é mudar de cômodo.** Na realocação, os móveis recebem vaga
+  nova via `propSlot`; somar um `dy` — o que funcionava na elevação — põe o
+  móvel no vizinho.
+- **Ordem de desenho é profundidade.** O `z-index` do robô sai do y de tela;
+  sem isso, quem está no fundo aparece por cima da parede da frente.
+
+O **poço do elevador** fica atrás das plataformas (`SHAFT.wy` negativo) e é
+desenhado antes delas; a cabine, depois de tudo, para ser vista. A viagem até
+uma estação sai em três pernas (`leg: board | ride | off`), encadeadas por
+promessa no renderizador: sem o encadeamento a motion troca o destino no meio e
+o robô corta caminho pelo ar.
+
+## Ritmo
+
+O robô é máquina pesada: `WALK` é um spring frouxo (stiffness 16) e a cabine
+leva 1,5 s. É deliberado — a sessão real dispara ferramentas em rajada, e é a
+lentidão que deixa o olho acompanhar quem foi para onde. Acelerar isto desfaz o
+efeito inteiro.
 
 ## Invariantes do desenho
 
