@@ -420,7 +420,7 @@ function refreshRooms() {
   for (const r of list) {
     const o = document.createElement('option');
     o.value = r.id;
-    o.textContent = `${r.closed ? '·' : '●'} ${r.cwd || r.label} · ${r.id.slice(0, 8)}`;
+    o.textContent = `● ${r.cwd || r.label} · ${r.id.slice(0, 8)}`;
     $rooms.appendChild(o);
   }
   if (currentRoom) $rooms.value = currentRoom;
@@ -474,6 +474,25 @@ function connect() {
     if (msg.type !== 'event') return;
     const ev = msg.event;
     const now = Date.now();
+
+    // SessionEnd mata a sala: sai do seletor na hora. Se era a sala aberta,
+    // cai para a próxima viva, ou para a tela vazia se não sobrou nenhuma.
+    if (ev.kind === 'session_end') {
+      rooms.delete(ev.session);
+      refreshRooms();
+      if (ev.session === currentRoom) {
+        const next = [...rooms.values()].sort((a, b) => b.lastSeen - a.lastSeen)[0];
+        if (next) {
+          switchRoom(next.id);
+        } else {
+          currentRoom = null;
+          clearRoom();
+          renderCast();
+          $empty.hidden = false;
+        }
+      }
+      return;
+    }
 
     if (!rooms.has(ev.session)) {
       rooms.set(ev.session, { id: ev.session, label: ev.session.slice(0, 8), cwd: ev.cwd, lastSeen: now });
