@@ -63,6 +63,9 @@ export function shape(h) {
   switch (h.hook_event_name) {
     case 'SubagentStart':
       ev.kind = 'spawn';
+      // Quem gerou o filho, quando o hook diz — a cena usa isso para fazê-lo
+      // sair da porta do pai. Sem o campo, a cena recorre a quem convocou por último.
+      ev.parentId = h.parent_agent_id || h.parent_id || undefined;
       break;
 
     case 'SubagentStop':

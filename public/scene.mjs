@@ -107,6 +107,7 @@ export function createScene() {
   return {
     agents: new Map(),
     props: new Map(),
+    doorAgent: null,   // quem convocou por último: a porta de onde o próximo filho sai
   };
 }
 
@@ -164,9 +165,18 @@ function relocateAgent(scene, agent, cmds) {
   }
 }
 
+/** A porta por onde um filho recém-convocado entra: o cômodo do pai, se ele
+ *  ainda está no prédio; senão a porta do prédio. Sem pai não há linhagem. */
+function parentDoor(scene, ev) {
+  const parentId = ev.parentId || scene.doorAgent;
+  if (!parentId || parentId === ev.agentId) return null;
+  const parent = scene.agents.get(parentId);
+  return parent ? { x: parent.x, y: parent.y } : null;
+}
+
 // ── agentes e móveis ──────────────────────────────────────────────────────
 
-function ensureAgent(scene, id, type, cmds) {
+function ensureAgent(scene, id, type, cmds, entry) {
   let a = scene.agents.get(id);
   if (!a) {
     const isMain = id === 'main';
@@ -192,12 +202,18 @@ function ensureAgent(scene, id, type, cmds) {
     }
     a.room = allocRoom(scene, a);
     const home = roomHome(a.room);
-    a.x = home.x;
-    a.y = home.y;
+    // Um filho convocado nasce na porta do cômodo do pai (`entry`) e caminha
+    // dali até o próprio cômodo. Sem pai no prédio, entra pela porta do prédio;
+    // o principal já estava dentro e nasce no cômodo dele.
+    const start = entry || (isMain ? home : DOOR);
+    a.x = start.x;
+    a.y = start.y;
     scene.agents.set(id, a);
     // Emitido aqui, e não só no spawn: o agente principal nunca dá spawn —
     // ele aparece no primeiro evento que gerar, e sem isto ficava invisível.
-    cmds?.push({ op: 'agent-enter', agent: a });
+    // O ponto de entrada vai no comando, não só no objeto: o `moveTo` seguinte
+    // sobrescreve `a.x`, e sem o retrato o renderizador perderia de onde partir.
+    cmds?.push({ op: 'agent-enter', agent: a, x: a.x, y: a.y });
   }
   if (type && type !== 'main') a.type = type;
   return a;
@@ -262,7 +278,9 @@ export function apply(scene, ev) {
   if (!KINDS.has(ev.kind)) return [];
 
   const cmds = [];
-  const a = ensureAgent(scene, ev.agentId, ev.agentType, cmds);
+  // Um filho recém-convocado precisa saber a porta do pai antes de nascer.
+  const entry = ev.kind === 'spawn' ? parentDoor(scene, ev) : null;
+  const a = ensureAgent(scene, ev.agentId, ev.agentType, cmds, entry);
 
   switch (ev.kind) {
     case 'spawn': {
@@ -285,6 +303,8 @@ export function apply(scene, ev) {
       if (seed.kind === 'door') {
         a.propKey = null;
         a.away = false;
+        // Quem convoca vira a porta de onde o próximo filho vai sair.
+        scene.doorAgent = a.id;
         const home = roomHome(a.room);
         moveTo(scene, a, home.x, home.y, cmds);
         cmds.push({ op: 'agent-state', agent: a });
@@ -373,6 +393,7 @@ export function apply(scene, ev) {
 export function rebuild(scene, events) {
   scene.agents.clear();
   scene.props.clear();
+  scene.doorAgent = null;
   const cmds = [];
   for (const ev of events || []) {
     for (const c of apply(scene, ev)) cmds.push({ ...c, instant: true });

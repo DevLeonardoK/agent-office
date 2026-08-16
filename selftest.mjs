@@ -191,6 +191,39 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   { const v = invariantsHold(s); ok('invariantes valem com estações em uso', v.ok, v.detail); }
 }
 
+// ── a porta do pai: o filho surge no cômodo de quem o convocou ────────────
+{
+  const s = createScene();
+  // o principal convoca um subagente: caminha até a porta e fica lá.
+  apply(s, evt({ kind: 'tool_start', tool: 'Task', prop: { kind: 'door', key: 'door', label: 'porta' } }));
+  const pai = s.agents.get('main');
+
+  const c = apply(s, evt({ kind: 'spawn', agentId: 'ag-1', agentType: 'Explore' }));
+  const enter = cmdsOf(c, 'agent-enter')[0];
+  ok('o filho entra pela porta do cômodo do pai', enter && Math.hypot(enter.x - pai.x, enter.y - pai.y) < 1,
+     `enter=(${enter?.x},${enter?.y}) pai=(${pai.x},${pai.y})`);
+
+  const move = cmdsOf(c, 'agent-move')[0];
+  ok('e caminha dali até o próprio cômodo', move && (move.x !== enter.x || move.y !== enter.y),
+     `move=(${move?.x},${move?.y})`);
+
+  const filho = s.agents.get('ag-1');
+  ok('o cômodo do filho não é o do pai', Math.hypot(filho.x - pai.x, filho.y - pai.y) > 24,
+     `filho=(${filho.x},${filho.y})`);
+  ok('nenhum móvel novo foi criado pela linhagem', s.props.size === 0);
+}
+
+// ── pai que já saiu não quebra a chegada do filho ─────────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'tool_start', tool: 'Task', prop: { kind: 'door', key: 'door', label: 'porta' } }));
+  apply(s, evt({ kind: 'stop', agentId: 'main' }));   // o pai vai embora antes do filho chegar
+  const c = apply(s, evt({ kind: 'spawn', agentId: 'ag-1', agentType: 'Explore' }));
+  const enter = cmdsOf(c, 'agent-enter')[0];
+  ok('sem pai no prédio, o filho entra pela porta do prédio', enter && enter.x === DOOR.x && enter.y === DOOR.y,
+     `enter=(${enter?.x},${enter?.y})`);
+}
+
 // ── saída libera o cômodo, que é reciclado ──────────────────────────────────
 {
   const s = createScene();
