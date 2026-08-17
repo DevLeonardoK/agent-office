@@ -16,7 +16,7 @@ const params = new URLSearchParams(location.search);
 
 // Carimbo do desenho carregado. Suba isto quando o desenho mudar de forma — é o
 // que distingue "não mudou" de "o navegador está com o arquivo velho".
-const BUILD = '3d · three · escada';
+const BUILD = '3d · órbita · escadaria';
 
 // `instant` despeja o roteiro de uma vez: os robôs aparecem já no destino.
 const STILL = params.has('instant') || matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -61,9 +61,27 @@ const three = new THREE.Scene();
 // Ortográfica, não perspectiva: é a projeção que mantém a leitura de planta — um
 // cômodo do 3º andar mede o mesmo que um do 1º, e nada afunila com a distância.
 const camera = new THREE.OrthographicCamera(-10, 10, 10, -10, -300, 600);
-// Mais alto que a isométrica clássica: com a câmera baixa, a parede do fundo de
-// um andar cobre o piso do próprio andar.
-const VIEW_DIR = new THREE.Vector3(1, 1.16, 1).normalize();
+// A órbita da câmera. O azimute começa na diagonal clássica de planta e a
+// elevação, mais alta que a isométrica pura: com a câmera baixa, a parede do
+// fundo de um andar cobre o piso do próprio andar.
+const HOME_VIEW = { azim: Math.PI / 4, elev: 0.72, zoom: 1 };
+const view = { ...HOME_VIEW };
+
+// `?view=azim,elev,zoom` (radianos) fixa a órbita no arranque: é o único jeito de
+// um print headless, que não arrasta o mouse, mostrar outro ângulo.
+if (params.has('view')) {
+  const [azim, elev, zoom] = String(params.get('view')).split(',').map(Number);
+  if (Number.isFinite(azim)) view.azim = azim;
+  if (Number.isFinite(elev)) view.elev = Math.min(1.45, Math.max(0.16, elev));
+  if (Number.isFinite(zoom) && zoom > 0) view.zoom = zoom;
+}
+let orbited = false;   // enquanto ninguém girou, o enquadramento é automático
+
+/** A direção de onde a câmera olha, a partir dos ângulos da órbita. */
+function viewDir() {
+  const r = Math.cos(view.elev);
+  return new THREE.Vector3(Math.sin(view.azim) * r, Math.sin(view.elev), Math.cos(view.azim) * r);
+}
 
 const renderer = new THREE.WebGLRenderer({ canvas: $canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
@@ -474,7 +492,7 @@ function frame() {
   const b = { min: bmin, max: bmax };
   const center = new THREE.Vector3().addVectors(bmin, bmax).multiplyScalar(0.5);
 
-  camera.position.copy(center).addScaledVector(VIEW_DIR, 200);
+  camera.position.copy(center).addScaledVector(viewDir(), 200);
   camera.lookAt(center);
   camera.updateMatrixWorld();
 
@@ -508,7 +526,7 @@ function frame() {
   const freeW = Math.max(120, r.width - leftRail - rightRail);
   const freeAspect = Math.max(0.2, freeW / Math.max(1, r.height));
 
-  const half = Math.max(h, w / freeAspect) * pad;
+  const half = (Math.max(h, w / freeAspect) * pad) / view.zoom;
   const unitsPerPx = (2 * half * aspect) / Math.max(1, r.width);
   const shift = ((leftRail - rightRail) / 2) * unitsPerPx;
 
@@ -594,6 +612,53 @@ function placeLabels(now) {
     rec.node.style.transform = `translate(-50%, -100%) translate(${(v.x * 0.5 + 0.5) * r.width}px, ${(-v.y * 0.5 + 0.5) * r.height}px)`;
   }
 }
+
+// ── órbita: arrastar gira, roda aproxima, duplo clique volta ──────────────
+//
+// Escrito à mão em vez de vendorizar o OrbitControls: são vinte linhas, e o
+// controle oficial traz pan e damping que aqui só atrapalhariam — o prédio tem
+// de continuar centrado sozinho.
+
+let drag = null;
+
+$canvas.addEventListener('pointerdown', (e) => {
+  drag = { x: e.clientX, y: e.clientY };
+  $canvas.setPointerCapture(e.pointerId);
+  $canvas.style.cursor = 'grabbing';
+});
+
+$canvas.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x;
+  const dy = e.clientY - drag.y;
+  drag = { x: e.clientX, y: e.clientY };
+  orbited = true;
+  view.azim -= dx * 0.006;
+  // A elevação para antes do horizonte e antes do zênite: por baixo do prédio
+  // não há nada para ver, e de cima em pico a planta perde a leitura.
+  view.elev = Math.min(1.45, Math.max(0.16, view.elev - dy * 0.005));
+  frame();
+});
+
+const endDrag = () => { drag = null; $canvas.style.cursor = 'grab'; };
+$canvas.addEventListener('pointerup', endDrag);
+$canvas.addEventListener('pointercancel', endDrag);
+
+$canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  orbited = true;
+  view.zoom = Math.min(4, Math.max(0.45, view.zoom * (e.deltaY > 0 ? 0.92 : 1.08)));
+  frame();
+}, { passive: false });
+
+$canvas.addEventListener('dblclick', () => {
+  Object.assign(view, HOME_VIEW);
+  orbited = false;
+  frame();
+});
+
+$canvas.style.cursor = 'grab';
+$canvas.title = 'arraste para girar · roda para aproximar · duplo clique volta ao enquadramento';
 
 // ── execução dos comandos da cena ─────────────────────────────────────────
 

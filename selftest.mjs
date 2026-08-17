@@ -824,6 +824,52 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   { const v = invariantsHold(s); ok('invariantes valem com dois na estação', v.ok, v.detail); }
 }
 
+// ── a escadaria é contínua e ninguém atravessa o vazio (issue #19) ──────────
+{
+  const s = createScene();
+  // Enche dois andares, para existir mais de um lance.
+  apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
+  const floors = floorCount(s);
+  ok('o prédio tem dois andares para testar a escadaria', floors === 2);
+
+  // Cada vão tem o seu lance, e um lance encosta no seguinte: de qualquer andar
+  // dá para descer, lance a lance, até o térreo.
+  for (let f = GROUND_FLOOR; f < floors - 1; f++) {
+    const foot = stairFoot(f);
+    const head = stairHead(f);
+    ok(`o lance ${f}→${f + 1} sai do andar ${f}`, foot.wy === levelY(f));
+    ok(`o lance ${f}→${f + 1} chega ao andar ${f + 1}`, head.wy === levelY(f + 1));
+    // o pé do lance está sobre a plataforma do andar de onde ele sai
+    const l = localOf(foot, f);
+    const plate = plateOf(f);
+    ok(`o pé do lance ${f}→${f + 1} pisa na plataforma`, l.lx > 0 && l.lx < plate.x && l.lz > 0 && l.lz < plate.z,
+       `local=(${l.lx.toFixed(1)},${l.lz.toFixed(1)})`);
+  }
+  // A cadeia fecha: descendo de lance em lance a partir do topo chega-se ao térreo.
+  let y = levelY(floors - 1);
+  for (let f = floors - 2; f >= GROUND_FLOOR; f--) {
+    ok(`o lance ${f}→${f + 1} recebe quem vem de cima`, stairHead(f).wy === y);
+    y = stairFoot(f).wy;
+  }
+  ok('a escadaria termina no térreo', y === levelY(GROUND_FLOOR));
+
+  // E o trajeto: nenhuma perna de caminhada muda de altura sem degrau. Era assim
+  // que o robô saía do prédio pelo ar, na diagonal.
+  const upstairs = [...s.agents.values()].find((a) => Math.floor(a.room / ROOMS_PER_FLOOR) === 1);
+  const c = apply(s, evt({ kind: 'stop', agentId: upstairs.id, agentType: upstairs.type, text: 'tchau' }));
+  const legs = cmdsOf(c, 'agent-move');
+  ok('sair do prédio passa pela escada', legs.some((m) => m.kind === 'stair'));
+  let jumps = 0;
+  for (let i = 1; i < legs.length; i++) {
+    if (legs[i].kind !== 'stair' && Math.abs(legs[i].wy - legs[i - 1].wy) > 0.01) jumps++;
+  }
+  ok('nenhuma caminhada muda de altura fora da escada', jumps === 0, `${jumps} pernas suspeitas`);
+  ok('a saída termina na porta, no térreo',
+     Math.abs(legs[legs.length - 1].wy - levelY(GROUND_FLOOR)) < 0.01 &&
+     Math.abs(legs[legs.length - 1].wx - DOOR.wx) < 0.01);
+}
+
 // ── o renderizador ao menos analisa ───────────────────────────────────────
 {
   // fileURLToPath e não `pathname`: no Windows o pathname vem como `/C:/...` e

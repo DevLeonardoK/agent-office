@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `three.js` e `motion.dev` estão
 vendorizadas em `public/vendor/` como bundles fechados.
 
 ```
-node selftest.mjs        # 183 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 196 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -120,6 +120,16 @@ posicionamento inteiro em Node.
   a largura útil — foi assim que o prédio ficou desenhado atrás do registro.
 - **Pé-direito baixo (1,9) e câmera alta.** Parede alta com câmera baixa projeta
   sobre o piso do próprio andar e o cômodo vira uma faixa preta.
+- **A câmera orbita**: arrastar gira, roda aproxima, duplo clique volta ao
+  enquadramento automático. Enquanto ninguém girou, o enquadramento se refaz a
+  cada mudança do prédio; depois de girar, o ângulo é do usuário. Para print,
+  `?view=azim,elev,zoom` fixa a órbita — o headless não arrasta o mouse.
+
+**Mudar de andar é sempre pela escada.** Quem decide é o `moveTo`: se o destino
+está em outro andar, ele roteia por `stairsTo`. Antes cada chamador escolhia, e o
+`stop` esqueceu — o agente saía do prédio atravessando o vazio na diagonal, o que
+se lia como robô perdido andando no ar. Há asserção no `selftest`: nenhuma perna
+de caminhada muda de altura fora da escada.
 
 ## Trajeto e ritmo
 

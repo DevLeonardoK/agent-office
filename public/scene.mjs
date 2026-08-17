@@ -433,8 +433,20 @@ function walkAlong(scene, a, points, cmds, kind = 'walk') {
   }
 }
 
-/** Caminhada normal dentro do andar em que o robô já está. */
+/**
+ * Leva o robô a um destino. Ponto único de roteamento: se o destino está em outro
+ * andar, o caminho passa pela escada — nenhum chamador precisa lembrar disso.
+ *
+ * Era o buraco que fazia o robô "andar no limbo": ao sair do prédio, ele ia da
+ * porta do próprio cômodo até a porta do térreo em linha reta, atravessando o
+ * vazio na diagonal.
+ */
 function moveTo(scene, a, target, cmds) {
+  const here = a.floor ?? Math.floor(a.room / ROOMS_PER_FLOOR);
+  if (target.floor !== here) {
+    stairsTo(scene, a, target, cmds);
+    return;
+  }
   const lane = target.floor === GROUND_FLOOR ? GROUND_LANE : LANE;
   walkAlong(scene, a, walkPath(a, target, lane), cmds);
 }
@@ -472,8 +484,7 @@ function returnHome(scene, a, cmds, status = 'idle') {
   a.away = false;
   a.since = Date.now();
   const home = roomHome(a.room);
-  if (wasAway) stairsTo(scene, a, home, cmds);
-  else moveTo(scene, a, home, cmds);
+  moveTo(scene, a, home, cmds);
   cmds.push({ op: 'agent-state', agent: a });
 }
 
@@ -501,10 +512,10 @@ export function apply(scene, ev) {
       a.status = 'walking';
       a.since = Date.now();
       const home = roomHome(a.room);
-      // Quem chega de fora entra pelo térreo e sobe de elevador; quem já estava
-      // no prédio (o principal, ou um filho que sai da porta do pai) só anda.
-      if (a.floor !== home.floor) stairsTo(scene, a, home, cmds);
-      else moveTo(scene, a, home, cmds);
+      // Quem chega de fora entra pelo térreo e sobe a escada; quem já estava no
+      // prédio (o principal, ou um filho que sai da porta do pai) só anda. Quem
+      // decide é o moveTo.
+      moveTo(scene, a, home, cmds);
       break;
     }
 
@@ -548,7 +559,7 @@ export function apply(scene, ev) {
         const rank = [...scene.agents.values()].filter((o) => o !== a && o.away && o.propKey === p.key).length;
         const spot = stationStand(p, rank);
         a.away = true;
-        stairsTo(scene, a, spot, cmds);
+        moveTo(scene, a, spot, cmds);
       } else {
         a.away = false;
         moveTo(scene, a, standAt(p, a.room), cmds);
