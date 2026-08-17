@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `three.js` e `motion.dev` estão
 vendorizadas em `public/vendor/` como bundles fechados.
 
 ```
-node selftest.mjs        # 287 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 300 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -125,10 +125,13 @@ ele quem resolve toda a geometria; o renderizador recebe pontos prontos e não
 calcula posição nenhuma. É isso que mantém o `selftest.mjs` capaz de exercitar o
 posicionamento inteiro em Node.
 
-- **Andares escalonados em profundidade** (`platformOrigin`): cada plataforma nasce
-  deslocada da de baixo, o que na tela já lê como diagonal. O escalonamento é só em
-  `z` de propósito: com desvio em `x`, a escada tinha de vencer o desvio lateral
-  além da altura, corria torta, e o vão dela furava a borda chanfrada.
+- **Andares escalonados na diagonal, mais para o lado que para o fundo**
+  (`platformOrigin`, `STAGGER`). Concentrar o deslocamento em `z` parecia mais
+  simples e escondia o andar de cima: ele recuava, caía atrás do de baixo na
+  projeção, e o de baixo — mais perto da câmera — ganhava o z-buffer. O piso do 2º
+  andar simplesmente não aparecia. Duas asserções sustentam isso agora: o desvio
+  lateral é maior que o de profundidade, e a **baia da escada cabe o desvio
+  lateral** (senão o lance cruza a laje dos cômodos do andar de cima).
 - **Plataforma pentagonal** (`platformShape`): o retângulo com o canto do fundo à
   **esquerda** chanfrado. À direita fica a baia da escada — chanfrar aquele canto
   era o que deixava a abertura da escada cortada.

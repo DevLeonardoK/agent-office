@@ -23,17 +23,22 @@ export const TILE = 1;                        // uma unidade de mundo = um ladri
 // é o trio que define a inclinação do lance. Pé-direito alto com plataforma curta
 // dá escada de 60°, ou joga o pé do lance fora do piso.
 export const LEVEL = 4.2;
-// O escalonamento por andar. É só em profundidade, de propósito: na tela isso já
-// lê como diagonal, e com deslocamento em x a escada tinha de vencer o desvio
-// lateral além da altura — corria torta, e o vão dela caía sobre o canto
-// chanfrado da plataforma, cortando a borda do prédio.
-export const STAGGER = { x: 0, z: -2.6 };
+// O escalonamento por andar: mais para o lado que para o fundo, e isso é medido, não
+// estético. Com o deslocamento concentrado em z, o andar de cima recuava, caía atrás
+// do de baixo na projeção e o piso dele não aparecia — o de baixo, mais perto da
+// câmera, ganhava o z-buffer. Empurrando em x, o andar de cima sai para o lado e
+// fica à vista. O desvio lateral não atrapalha mais a escada porque ela é em U: o
+// patamar do meio o absorve, e cada meio-lance segue reto.
+export const STAGGER = { x: 4.6, z: -1.0 };
 export const PLATE = { x: 13, z: 10 };        // os cômodos de um andar
-export const BAY = 4;                         // a baia da escada, à direita dos cômodos
+// A baia da escada tem de conter o desvio lateral do escalonamento: o lance sai do
+// patamar de um andar e chega ao do outro, que está `STAGGER.x` ao lado. Baia
+// estreita fazia o lance cruzar a laje dos cômodos do andar de cima.
+export const BAY = 8;
 
 // A baia em coordenadas locais: é a faixa em x onde o poço da escada é vazado.
-export const BAY_X0 = PLATE.x + 0.2;
-export const BAY_X1 = PLATE.x + BAY - 0.2;
+export const BAY_X0 = PLATE.x + 0.3;
+export const BAY_X1 = PLATE.x + BAY - 0.3;
 // Pé-direito desenhado. Baixo de propósito: parede alta, com a câmera inclinada,
 // projeta sobre o piso e tapa o cômodo — o andar virava uma faixa preta.
 export const WALL_H = 1.9;
@@ -195,7 +200,9 @@ const HALF = STEPS / 2;
 
 const LANDING_LZ = PLATE.z - 0.8;             // patamar de andar, na frente da baia
 const MID_LZ = 3.4;                           // patamar do meio, no fundo da baia
-const STAIR_CX = (BAY_X0 + BAY_X1) / 2;       // eixo da escada, no meio da baia
+// O eixo da escada fica na parte externa da baia: o patamar do andar de cima está
+// `STAGGER.x` adiante, e o lance precisa cair inteiro dentro da baia dos dois andares.
+const STAIR_CX = BAY_X0 + STAGGER.x + 1.0;
 const LANE_X = 0.9;                           // meio-lance de subida à direita, volta à esquerda
 
 /** Onde a laje é vazada para o poço, medindo do fundo do andar. */

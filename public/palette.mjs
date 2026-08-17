@@ -15,19 +15,19 @@ export const hsl = (h, s, l) => ({ h, s, l });
 // de competir com a carcaça de um robô — o prédio é claro, os robôs são vivos.
 
 export const BUILDING = {
-  wall: hsl(44, 0.62, 0.62),          // parede amarela
-  wallTrim: hsl(40, 0.45, 0.42),      // arremate do topo, mais escuro
+  wall: hsl(44, 0.82, 0.60),          // parede amarela, cheia
+  wallTrim: hsl(38, 0.62, 0.40),      // arremate do topo, mais escuro
   // Piso e laje quase sem matiz: assim eles não disputam faixa da roda de cores com
   // os agentes, e a leitura ali fica por conta do valor.
-  floorA: hsl(38, 0.10, 0.86),        // ladrilho creme
-  floorB: hsl(186, 0.28, 0.72),       // ladrilho alternado, azulado
-  slab: hsl(36, 0.10, 0.52),          // espessura da laje
-  divider: hsl(0, 0, 0.92),           // divisória entre cômodos, quase branca
-  stair: hsl(28, 0.34, 0.58),         // degrau
-  landing: hsl(28, 0.28, 0.48),       // patamar
-  rail: hsl(196, 0.42, 0.55),         // guarda-corpo
-  terrain: hsl(120, 0.22, 0.38),      // o terreno, verde de exterior
-  sidewalk: hsl(40, 0.16, 0.74),      // calçada
+  floorA: hsl(38, 0.14, 0.90),        // ladrilho creme
+  floorB: hsl(186, 0.50, 0.66),       // ladrilho alternado, azul-piscina
+  slab: hsl(36, 0.16, 0.50),          // espessura da laje
+  divider: hsl(0, 0, 0.96),           // divisória entre cômodos, branca
+  stair: hsl(28, 0.52, 0.56),         // degrau
+  landing: hsl(28, 0.44, 0.44),       // patamar
+  rail: hsl(196, 0.66, 0.52),         // guarda-corpo
+  terrain: hsl(118, 0.42, 0.40),      // o terreno, verde de grama
+  sidewalk: hsl(40, 0.26, 0.78),      // calçada
 };
 
 // ── os móveis ─────────────────────────────────────────────────────────────
@@ -36,14 +36,14 @@ export const BUILDING = {
 // cômodo, e a cor passa a ser o que distingue mesa de estante de longe.
 
 export const PROPS = {
-  desk: hsl(24, 0.44, 0.38),          // madeira: escura o bastante para não ler como salmão
-  shelf: hsl(8, 0.55, 0.48),          // estante vermelha
-  terminal: hsl(210, 0.30, 0.38),     // terminal, cinza-azulado
-  library: hsl(150, 0.42, 0.40),      // biblioteca verde
-  whiteboard: hsl(0, 0, 0.90),        // quadro branco
-  cabinet: hsl(50, 0.66, 0.52),       // arquivo morto, amarelo-mostarda
-  screen: hsl(196, 0.55, 0.30),       // vidro apagado
-  screenLit: hsl(186, 0.72, 0.58),    // vidro aceso
+  desk: hsl(24, 0.58, 0.36),          // madeira
+  shelf: hsl(8, 0.72, 0.46),          // estante vermelha
+  terminal: hsl(212, 0.48, 0.40),     // terminal, azul
+  library: hsl(150, 0.58, 0.38),      // biblioteca verde
+  whiteboard: hsl(0, 0, 0.94),        // quadro branco
+  cabinet: hsl(50, 0.82, 0.52),       // arquivo morto, mostarda
+  screen: hsl(196, 0.60, 0.26),       // vidro apagado
+  screenLit: hsl(186, 0.85, 0.60),    // vidro aceso
 };
 
 // ── os agentes ────────────────────────────────────────────────────────────

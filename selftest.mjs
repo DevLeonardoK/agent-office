@@ -10,7 +10,7 @@
 
 import {
   createScene, apply, rebuild, roomTiles, roomQuad, ROOMS_PER_FLOOR,
-  DOOR, STATIONS, MAIN_ROOM, floorCount, buildingBounds, platformShape, platformOrigin,
+  DOOR, STATIONS, MAIN_ROOM, floorCount, buildingBounds, platformShape, platformOrigin, BAY,
   plateOf, world, levelY, stairSteps, stairFoot, stairHead, STEPS, LEVEL, STAGGER,
   PLATE, GROUND_FLOOR, GROUND_PLATE, WALL_H, STAIR_LANES, stairLaneOffset, stairWell,
   HUE_COUNT, stairLanding, stairMid, stairDoor, inStairWell, BAY_X0, BAY_X1,
@@ -738,10 +738,15 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const o1 = platformOrigin(1);
   ok('o andar de cima é deslocado em profundidade', o1.z !== o0.z);
   ok('o deslocamento é o mesmo em todo andar', o1.x - o0.x === STAGGER.x && o1.z - o0.z === STAGGER.z);
-  // Sem desvio lateral, a escada corre reta e o vão dela é um retângulo alinhado —
-  // era o desvio em x que fazia o vão furar a borda chanfrada da plataforma.
-  ok('o escalonamento não desloca para o lado', STAGGER.x === 0);
-  ok('o lance corre reto', Math.abs(stairFoot(0).wx - stairHead(0).wx) < 1e-9);
+  // O escalonamento é mais lateral que profundo: concentrado em z, o andar de cima
+  // recuava e o de baixo o cobria na projeção — o piso do 2º andar não aparecia.
+  ok('o escalonamento é mais lateral que profundo', STAGGER.x > Math.abs(STAGGER.z),
+     `x=${STAGGER.x} z=${STAGGER.z}`);
+  // E a baia tem de conter o desvio lateral: senão o lance cruza a laje dos cômodos.
+  ok('a baia cabe o desvio lateral do lance', BAY_X1 - BAY_X0 > STAGGER.x + 1.5,
+     `baia=${(BAY_X1 - BAY_X0).toFixed(1)} desvio=${STAGGER.x}`);
+  // O primeiro meio-lance corre reto em z; o segundo absorve o desvio lateral.
+  ok('o primeiro meio-lance corre reto', Math.abs(stairLanding(0).wx - stairMid(0).wx) < 1e-9);
   ok('o andar de cima fica mais alto', levelY(1) - levelY(0) === LEVEL);
   ok('o térreo fica abaixo do 1º andar', levelY(GROUND_FLOOR) < levelY(0));
   ok('o térreo é a plataforma maior', plateOf(GROUND_FLOOR).z > plateOf(0).z);

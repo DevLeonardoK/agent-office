@@ -57,7 +57,9 @@ const HUES = AGENT_HUES;
 const hueOf = (a) => (a.isMain ? 0 : HUES[a.hueIndex % HUES.length]);
 if (HUES.length !== HUE_COUNT) console.warn('paleta e HUE_COUNT divergem: o matiz vai repetir fora de ordem');
 // O rosa precisa de mais luz para não ler como o vermelho do rosto de erro.
-const hueColor = (h, l = 0.54) => new THREE.Color().setHSL(h / 360, 0.62, h >= 300 ? l + 0.08 : l);
+// Carcaça viva: com o prédio colorido (ADR-0004), a saturação do robô é parte do que
+// o separa do fundo — o prédio é claro e menos saturado, ele é saturado e médio.
+const hueColor = (h, l = 0.52) => new THREE.Color().setHSL(h / 360, 0.82, h >= 300 ? l + 0.06 : l);
 
 // ── a cena three ──────────────────────────────────────────────────────────
 
@@ -369,6 +371,15 @@ function drawBuilding(floors) {
   }
   // Um lance por vão: do térreo ao 1º andar, e daí para cima.
   for (let f = GROUND_FLOOR; f < floors - 1; f++) building.add(drawStairs(f));
+
+  if (params.has('probe')) {
+    const info = [];
+    for (let f = GROUND_FLOOR; f < floors; f++) {
+      const sh = platformShape(f);
+      info.push(`andar ${f}: y=${sh[0].wy.toFixed(1)} verts=${sh.length} z=${sh.map((q) => q.wz.toFixed(1)).join('/')}`);
+    }
+    document.documentElement.dataset.plats = info.join(' | ');
+  }
 }
 
 // ── móveis ────────────────────────────────────────────────────────────────
