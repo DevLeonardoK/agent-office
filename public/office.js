@@ -452,24 +452,36 @@ function mountBot(agent, at) {
   const dark = new THREE.MeshLambertMaterial({ color: 0x2b3746 });
 
   const g = new THREE.Group();
-  // A esteira é o que toca o chão: escura, mas não tão escura quanto a laje —
-  // com a mesma cor, o robô parecia afundado no piso.
-  g.add(put(box(0.34, 0.32, 1.15, dark), -0.42, 0.16, 0));   // esteira
-  g.add(put(box(0.34, 0.32, 1.15, dark), 0.42, 0.16, 0));    // esteira
-  g.add(put(box(1.16, 1.0, 1.0, shell), 0, 0.82, 0));       // carcaça
-  g.add(put(box(0.5, 0.09, 0.12, shell), 0, 1.37, 0));      // alça
+
+  // A esteira é o que toca o chão: escura, mas não tão escura quanto a laje — com a
+  // mesma cor, o robô parecia afundado no piso. Cada uma é um objeto próprio porque
+  // a subida da escada as move, quadro a quadro (issue #16).
+  const treads = [
+    put(box(0.34, 0.32, 1.15, dark), -0.42, 0.16, 0),
+    put(box(0.34, 0.32, 1.15, dark), 0.42, 0.16, 0),
+  ];
+  for (const t of treads) g.add(t);
+
+  // Carcaça, alça e rosto num grupo só: é ele que se inclina para subir.
+  const body = new THREE.Group();
+  body.add(put(box(1.16, 1.0, 1.0, shell), 0, 0.82, 0));
+  body.add(put(box(0.5, 0.09, 0.12, shell), 0, 1.37, 0));
 
   const face = new THREE.Mesh(
     new THREE.PlaneGeometry(0.82, 0.82),
     new THREE.MeshBasicMaterial({ map: faceTexture(hue, 'idle', agent.isMain) }),
   );
   face.position.set(0, 0.86, 0.51);
-  g.add(face);
+  body.add(face);
+  g.add(body);
 
   g.position.set(at.wx ?? agent.wx, at.wy ?? agent.wy, at.wz ?? agent.wz);
   building.add(g);
 
-  const rec = { id: agent.id, group: g, face, hue, isMain: agent.isMain, queue: [], mood: 'idle', bob: 0, leaving: false };
+  const rec = {
+    id: agent.id, group: g, body, treads, face, hue, isMain: agent.isMain,
+    queue: [], mood: 'idle', bob: 0, leaving: false, frame: -1,
+  };
   bots.set(agent.id, rec);
   plateFor(agent);
   return rec;
@@ -491,6 +503,10 @@ function moveBot(id, wx, wy, wz, face, kind, start) {
   // O atraso que isso poderia acumular numa rajada é resolvido no laço, andando
   // mais rápido quando a fila cresce (ver `tick`), não teleportando.
   rec.queue.push({ wx, wy, wz, kind, face });
+  if (params.has('probe')) {
+    kindTally[kind || 'sem'] = (kindTally[kind || 'sem'] || 0) + 1;
+    document.documentElement.dataset.kinds = JSON.stringify(kindTally);
+  }
 }
 
 function stateBot(agent) {
@@ -694,8 +710,11 @@ const SPEED = 3.4;          // unidades de mundo por segundo — o passo do rob�
 const STAIR_SPEED = 2.0;    // degrau é mais devagar que piso plano
 
 let last = performance.now();
-function tick(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+function step(now) {
+  // O passo de tempo tem piso, não só teto: no tempo virtual do headless os timers
+  // disparam repetidas vezes no mesmo instante, o `dt` saía zero e o robô andava
+  // zero por quadro — a cena ficava parada para sempre, com a fila cheia.
+  const dt = Math.min(0.05, Math.max(0.008, (now - last) / 1000));
   last = now;
 
   for (const rec of bots.values()) {
@@ -720,12 +739,16 @@ function tick(now) {
       } else {
         const t = step / dist;
         p.set(p.x + dx * t, p.y + dy * t, p.z + dz * t);
-        // Subindo a escada o robô balança no ritmo do degrau; no plano, não.
-        rec.bob = leg.kind === 'stair' ? Math.abs(Math.sin(now / 110)) * 0.09 : 0;
+        rec.bob = leg.kind === 'stair' ? 0.05 : 0;
       }
       p.y += rec.bob;
       // A carcaça se vira para onde anda, só o suficiente para se ler.
       rec.group.rotation.y += ((leg.face > 0 ? -0.34 : 0.34) - rec.group.rotation.y) * 0.12;
+      pose(rec, leg.kind === 'stair' ? Math.floor(now / STEP_FRAME) % 2 : -1);
+      if (params.has('probe')) {
+        tickTally[leg.kind || 'sem'] = (tickTally[leg.kind || 'sem'] || 0) + 1;
+        document.documentElement.dataset.tick = JSON.stringify(tickTally);
+      }
     } else if (rec.leaving) {
       // Chegou à porta: agora sim sai de cena.
       removeBot(rec.id, rec);
@@ -743,7 +766,32 @@ function tick(now) {
   if (params.has('probe')) probeAir(now);
   placeLabels(now);
   renderer.render(three, camera);
+}
+
+function tick(now) {
+  step(now);
   requestAnimationFrame(tick);
+}
+
+/**
+ * Roda a simulação até todo mundo chegar, com passo de tempo sintético.
+ *
+ * Existe pelo print: no headless com tempo virtual o `requestAnimationFrame` quase
+ * não dispara — os timers do roteiro avançam, mas a cena fica no primeiro quadro, e
+ * todo print ao vivo saía com os robôs no meio do caminho. Um `setInterval` de
+ * socorro resolveria e criou outro problema: o navegador nunca ficava ocioso e o
+ * orçamento de tempo virtual não terminava. Assim é determinístico — N quadros, e
+ * para quando as filas esvaziam.
+ */
+function settle(frames = 2400) {
+  let t = performance.now();
+  for (let i = 0; i < frames; i++) {
+    t += 16;
+    step(t);
+    let andando = false;
+    for (const rec of bots.values()) if (rec.queue.length) { andando = true; break; }
+    if (!andando) break;
+  }
 }
 
 // Sonda de "robô no ar": conta quadros em que um robô muda de altura fora de uma
@@ -757,13 +805,55 @@ function probeAir() {
     const y = rec.group.position.y - rec.bob;
     const prev = airState.get(id);
     const kind = rec.queue[0]?.kind;
-    if (prev != null && Math.abs(y - prev) > 0.004 && kind !== 'stair') {
+    // A folga de 0,06 é o balanço da subida (`bob`): ele é aplicado e desfeito por
+    // quadro, e na troca de perna sobra um resíduo dessa ordem. Voo de verdade é
+    // salto de unidade, não de centésimo.
+    if (prev != null && Math.abs(y - prev) > 0.06 && kind !== 'stair') {
       airFrames++;
       airWorst = Math.max(airWorst, Math.abs(y - prev));
     }
     airState.set(id, y);
   }
   document.documentElement.dataset.air = `${airFrames}|${airWorst.toFixed(3)}`;
+}
+
+const kindTally = {};
+const tickTally = {};
+const STEP_FRAME = 150;   // duração de um quadro da subida, em ms
+
+/**
+ * A pose do robô, quadro a quadro (issue #16). `-1` é a pose parada; 0 e 1 são os
+ * dois quadros da subida, que alternam qual esteira vai à frente e inclinam a
+ * carcaça para cima.
+ *
+ * São **quadros vetoriais**: mexem em malhas que já existem, então o matiz continua
+ * vindo do material — nada de sprite pré-renderizado por cor, que a invariante do
+ * CLAUDE.md proíbe. E não é animação cíclica de CSS: quem manda é o laço, então
+ * qualquer quadro é uma pose íntegra e o print headless nunca pega o robô torto.
+ */
+const poseCount = [0, 0];
+
+function pose(rec, frame) {
+  if (frame === rec.frame) return;
+  rec.frame = frame;
+  if (frame >= 0 && params.has('probe')) {
+    poseCount[frame]++;
+    document.documentElement.dataset.pose = `quadro0=${poseCount[0]} quadro1=${poseCount[1]}`;
+  }
+
+  if (frame < 0) {
+    rec.body.rotation.x = 0;
+    rec.body.position.set(0, 0, 0);
+    rec.treads[0].position.set(-0.42, 0.16, 0);
+    rec.treads[1].position.set(0.42, 0.16, 0);
+    return;
+  }
+
+  const a = frame === 0 ? 1 : -1;
+  rec.body.rotation.x = -0.14;                    // inclina para a subida
+  rec.body.position.set(0, 0.04, -0.05);
+  rec.treads[0].position.set(-0.42, 0.16 + (a > 0 ? 0.12 : 0), a * 0.16);
+  rec.treads[1].position.set(0.42, 0.16 + (a > 0 ? 0 : 0.12), -a * 0.16);
 }
 
 const v = new THREE.Vector3();
@@ -1177,6 +1267,8 @@ if (params.has('demo')) {
   const { playDemo } = await import('./demo.mjs');
   const upto = Number(params.get('upto')) || Infinity;
   await playDemo((ev) => run(apply(scene, ev)), params.has('instant'), upto);
+  // Deixa todo mundo chegar antes de declarar a cena pronta para o print.
+  settle();
   // `?stress` faz todo mundo falar de uma vez: é o caso que a issue #13 descreve e
   // que o roteiro do demo, com as falas espaçadas, nunca produz.
   if (params.has('stress')) {

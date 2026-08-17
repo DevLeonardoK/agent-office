@@ -63,10 +63,17 @@ chrome --headless=new --screenshot=shot.png --window-size=1500,860 \
 #   --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader
 ```
 
-O orçamento não é folga: com o ritmo lento e a subida degrau a degrau, um print
-curto pega os robôs no meio do caminho e parece bug de posicionamento. No modo
-demo, `document.documentElement.dataset.ready` vira `true` quando o roteiro
-acaba — é o sinal de que a cena pode ser fotografada.
+**O `requestAnimationFrame` quase não dispara no headless com tempo virtual.** Os
+timers do roteiro avançam, a cena fica parada no primeiro quadro, e todo print ao
+vivo saía com os robôs no meio do caminho — o que parece bug de posicionamento e
+não é. Por isso o modo demo chama `settle()` no fim: roda a simulação com passo
+sintético de 16 ms até as filas esvaziarem, e só então `dataset.ready` vira `true`.
+
+Um `setInterval` de socorro parecia resolver e criou outro problema: o navegador
+nunca ficava ocioso e o orçamento de tempo virtual não terminava — o print
+travava. E o passo de tempo precisa de **piso**, não só teto: no tempo virtual os
+timers disparam repetidas vezes no mesmo instante, o `dt` saía zero, e o robô
+andava zero por quadro para sempre, com a fila cheia.
 
 O `upto=21` para o roteiro com seis agentes vivos — é onde o 2º andar existe. O
 print não clica, então a vista de andar cheio se pede pela URL: `&floor=1` abre
@@ -158,6 +165,13 @@ posicionamento inteiro em Node.
 `% 5` casado por acidente com os cinco cômodos por andar; com o rosa (issue #17)
 são seis, e um andar cheio pode repetir cor — preço aceito para o rosa existir e
 não se confundir com o violeta.
+
+**A subida da escada é animada por quadros vetoriais** (issue #16): duas poses que
+alternam a cada 150 ms, movendo as esteiras que já existem e inclinando a carcaça.
+Quem manda é o laço, não uma animação cíclica de CSS — qualquer quadro é pose
+íntegra, e o print nunca pega o robô torto. O matiz continua vindo do material, sem
+sprite pré-renderizado por cor. `?probe` publica `dataset.pose` com a contagem de
+cada quadro.
 
 **Balões: no máximo três, e nenhum cobre o outro** (issue #13). O teto está em
 `MAX_BUBBLES`; o quarto empurra o mais antigo, cujo texto já está no registro. A
