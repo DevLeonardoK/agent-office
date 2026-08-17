@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `three.js` e `motion.dev` estão
 vendorizadas em `public/vendor/` como bundles fechados.
 
 ```
-node selftest.mjs        # 234 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 287 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -225,8 +225,15 @@ estavam, não onde estão.
 
 ## Invariantes do desenho
 
-*Desenho frio, gente quente.* O prédio inteiro é azul de prancheta
-dessaturado; os agentes são a única coisa saturada da tela. Os agentes são
+*O prédio é colorido; o agente se acha por valor, matiz e silhueta* (ADR-0004 —
+revoga o "desenho frio, gente quente" original). O prédio é claro e pouco
+saturado; a carcaça do robô é saturada e de valor médio, os seis matizes de agente
+ficam a 24° um do outro e a 20° de qualquer cor de fundo, e o robô é a única forma
+alta e arredondada num mundo de caixas.
+
+A paleta mora em `public/palette.mjs`, sem DOM e sem `three`, e o `selftest.mjs`
+afirma essas distâncias: pintar uma parede da cor de um robô reprova o teste. A
+interface 2D fica sóbria de propósito — moldura escura, cena colorida. Os agentes são
 robôs de esteira com carcaça colorida — a carcaça *é* o matiz. Os subagents
 recebem os **seis** matizes da paleta (âmbar, vermelho, verde, violeta, magenta e
 rosa); o principal recebe um gradiente arco-íris,

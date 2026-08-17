@@ -6,6 +6,7 @@
 // motion.dev compor, então ela saiu do renderizador.
 
 import * as THREE from './vendor/three.js';
+import { BUILDING, PROPS, AGENT_HUES, css } from './palette.mjs';
 import {
   createScene, apply, rebuild, floorCount, buildingBounds, platformShape, plateOf,
   roomQuad, world, platformOrigin, levelY, ROOMS_PER_FLOOR, PLATE,
@@ -49,14 +50,10 @@ let roomActivity = 0;
 let logged = 0;
 let drawnFloors = 0;
 
-// Os matizes dos subagentes, quentes contra o azul técnico do prédio. O principal
-// não usa nenhum deles — ele carrega o arco-íris.
-//
-// O rosa (338) entrou como sexto matiz (issue #17). O magenta 328 de antes puxava
-// para o roxo e não se distinguia do violeta; e, ao acrescentar o rosa, o magenta
-// virou o terceiro vizinho da mesma faixa — três robôs parecidos na tela. Então a
-// paleta foi reespaçada: os seis matizes ficam a pelo menos 50° um do outro.
-const HUES = [38, 8, 90, 165, 262, 338];
+// Os matizes dos subagentes vêm da paleta, que também garante a distância deles em
+// relação às cores do prédio (ADR-0004). O principal não usa matiz: leva o
+// arco-íris.
+const HUES = AGENT_HUES;
 const hueOf = (a) => (a.isMain ? 0 : HUES[a.hueIndex % HUES.length]);
 if (HUES.length !== HUE_COUNT) console.warn('paleta e HUE_COUNT divergem: o matiz vai repetir fora de ordem');
 // O rosa precisa de mais luz para não ler como o vermelho do rosto de erro.
@@ -97,34 +94,64 @@ renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
 // Luz de prancheta: uma direcional fria de cima e preenchimento hemisférico, só
 // o suficiente para as faces se distinguirem. Sombra projetada fica fora — custa
 // um passe de render por quadro e sujaria o desenho minimalista.
-const sun = new THREE.DirectionalLight(0xdcebff, 1.1);
+// Luz de dia: com o prédio claro (ADR-0004), a luz de antes — feita para o azul
+// escuro — achatava tudo. Direcional mais suave, preenchimento mais forte.
+const sun = new THREE.DirectionalLight(0xfff4e0, 0.85);
 sun.position.set(9, 16, 7);
 three.add(sun);
-three.add(new THREE.HemisphereLight(0x8fb6d8, 0x0a121c, 0.8));
-three.add(new THREE.AmbientLight(0x24405c, 0.55));
+three.add(new THREE.HemisphereLight(0xf0f6ff, 0x6d7a53, 0.75));
+three.add(new THREE.AmbientLight(0xffffff, 0.55));
+
+// Os materiais saem da paleta (ADR-0004): o escritório é colorido, e a cor é regra
+// do projeto — mora em `palette.mjs`, não aqui.
+const lam = (c, extra = {}) => new THREE.MeshLambertMaterial({ color: new THREE.Color().setHSL(c.h / 360, c.s, c.l), ...extra });
+const basic = (c) => new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(c.h / 360, c.s, c.l) });
 
 const mat = {
-  // DoubleSide no piso e nas paredes: a forma do pentágono vem do scene.mjs e a
-  // ordem dos vértices não é garantida — com face única, uma plataforma podia
-  // aparecer preta por estar de costas para a câmera.
-  floor: new THREE.MeshLambertMaterial({ color: 0x1e3a55, side: THREE.DoubleSide }),
-  slab: new THREE.MeshLambertMaterial({ color: 0x0d1a27 }),
-  wall: new THREE.MeshLambertMaterial({ color: 0x152943, side: THREE.DoubleSide }),
-  // A divisória é baixa e mais clara que a parede: alta e escura, ela se
-  // confundia com móvel e o cômodo virava um corredor de barras.
-  divider: new THREE.MeshLambertMaterial({ color: 0x2d4d6d }),
-  rail: new THREE.MeshLambertMaterial({ color: 0x4a7ba6 }),
-  landing: new THREE.MeshLambertMaterial({ color: 0x2b4a68 }),
-  line: new THREE.LineBasicMaterial({ color: 0x3d6c93, transparent: true, opacity: 0.42 }),
-  edge: new THREE.LineBasicMaterial({ color: 0x5d93bc, transparent: true, opacity: 0.9 }),
-  step: new THREE.MeshLambertMaterial({ color: 0x1b3048 }),
-  furniture: new THREE.MeshLambertMaterial({ color: 0x39628a }),
-  station: new THREE.MeshLambertMaterial({ color: 0x2a4c6b }),
-  screen: new THREE.MeshBasicMaterial({ color: 0x0a1520 }),
-  screenLit: new THREE.MeshBasicMaterial({ color: 0x2e5c7e }),
-  dark: new THREE.MeshLambertMaterial({ color: 0x0a1119 }),
-  terrain: new THREE.MeshLambertMaterial({ color: 0x14202e }),
+  // O piso é uma textura de xadrez, no tamanho do ladrilho: dois tons alternados,
+  // como no piso da referência. Pintar ladrilho por ladrilho custaria uma malha
+  // por quadrado.
+  floor: new THREE.MeshLambertMaterial({ side: THREE.DoubleSide }),
+  slab: lam(BUILDING.slab),
+  wall: lam(BUILDING.wall, { side: THREE.DoubleSide }),
+  line: new THREE.LineBasicMaterial({ color: 0x6b5a2f, transparent: true, opacity: 0.28 }),
+  edge: new THREE.LineBasicMaterial({ color: 0x7d6a3c, transparent: true, opacity: 0.7 }),
+  divider: lam(BUILDING.divider),
+  step: lam(BUILDING.stair),
+  landing: lam(BUILDING.landing),
+  rail: lam(BUILDING.rail),
+  terrain: lam(BUILDING.terrain),
+  sidewalk: lam(BUILDING.sidewalk),
+  furniture: lam(PROPS.desk),
+  shelf: lam(PROPS.shelf),
+  station: lam(PROPS.terminal),
+  library: lam(PROPS.library),
+  whiteboard: lam(PROPS.whiteboard),
+  cabinet: lam(PROPS.cabinet),
+  screen: basic(PROPS.screen),
+  screenLit: basic(PROPS.screenLit),
+  dark: lam(hsl2(28, 0.30, 0.30)),
 };
+
+function hsl2(h, s, l) { return { h, s, l }; }
+
+// O xadrez do piso: canvas de dois quadrados, repetido por ladrilho.
+{
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const x = c.getContext('2d');
+  x.fillStyle = css(BUILDING.floorA);
+  x.fillRect(0, 0, 64, 64);
+  x.fillStyle = css(BUILDING.floorB);
+  x.fillRect(0, 0, 32, 32);
+  x.fillRect(32, 32, 32, 32);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  // Duas casas por ladrilho: o xadrez fica na escala do piso, não do prédio.
+  t.repeat.set(0.5, 0.5);
+  mat.floor.map = t;
+}
 
 // O prédio inteiro vive num grupo só: redesenhar é limpar e montar de novo, o
 // que é barato (algumas centenas de malhas) e evita sincronizar andar por andar.
@@ -157,6 +184,8 @@ function drawTerrain() {
   const w = t.x1 - t.x0;
   const d = t.z1 - t.z0;
   g.add(put(box(w, 0.5, d, mat.terrain), (t.x0 + t.x1) / 2, t.y - 0.25, (t.z0 + t.z1) / 2));
+  // Calçada: uma laje clara sob a pegada do prédio, um fio acima do terreno.
+  g.add(put(box(w - 5, 0.12, d - 5, mat.sidewalk), (t.x0 + t.x1) / 2, t.y + 0.06, (t.z0 + t.z1) / 2));
   // Uma faixa de calçada mais clara em volta da pegada do térreo, para o prédio
   // assentar em algo em vez de nascer do nada.
   g.add(outline([
@@ -248,7 +277,7 @@ function drawPartitions(floor) {
   const y = levelY(floor);
   for (let i = 1; i < ROOMS_PER_FLOOR; i++) {
     const at = world((PLATE.x / ROOMS_PER_FLOOR) * i, PLATE.z * 0.42, floor);
-    g.add(put(box(0.1, 0.55, PLATE.z * 0.86, mat.divider), at.wx, y + 0.275, at.wz));
+    g.add(put(box(0.12, 0.62, PLATE.z * 0.86, mat.divider), at.wx, y + 0.31, at.wz));
   }
   return g;
 }
@@ -293,19 +322,20 @@ function drawStations() {
   const g = new THREE.Group();
   for (const [kind, st] of Object.entries(STATIONS)) {
     const s = new THREE.Group();
+    const corpo = { terminal: mat.station, library: mat.library, whiteboard: mat.whiteboard, cabinet: mat.cabinet }[kind] || mat.station;
     if (kind === 'terminal') {
-      s.add(put(box(1.9, 0.16, 1.1, mat.station), 0, 0.76, 0));
+      s.add(put(box(1.9, 0.16, 1.1, corpo), 0, 0.76, 0));
       s.add(put(box(0.24, 0.76, 0.24, mat.dark), 0, 0.38, 0));
       s.add(put(box(1.5, 0.9, 0.1, mat.screen), 0, 1.36, -0.42));
-      s.add(put(box(1.6, 1.02, 0.16, mat.station), 0, 1.36, -0.5));
+      s.add(put(box(1.6, 1.02, 0.16, corpo), 0, 1.36, -0.5));
     } else if (kind === 'library') {
-      s.add(put(box(2.2, 2.0, 0.5, mat.station), 0, 1.0, -0.3));
+      s.add(put(box(2.2, 2.0, 0.5, corpo), 0, 1.0, -0.3));
       for (let i = 0; i < 3; i++) s.add(put(box(2.05, 0.08, 0.56, mat.dark), 0, 0.5 + i * 0.6, -0.3));
     } else if (kind === 'whiteboard') {
       s.add(put(box(2.4, 1.5, 0.12, mat.screen), 0, 1.4, -0.3));
-      s.add(put(box(2.52, 1.62, 0.2, mat.station), 0, 1.4, -0.38));
+      s.add(put(box(2.52, 1.62, 0.2, corpo), 0, 1.4, -0.38));
     } else {
-      s.add(put(box(1.5, 1.7, 1.0, mat.station), 0, 0.85, 0));
+      s.add(put(box(1.5, 1.7, 1.0, corpo), 0, 0.85, 0));
       for (let i = 0; i < 3; i++) s.add(put(box(1.1, 0.07, 0.07, mat.dark), 0, 0.45 + i * 0.5, 0.52));
     }
     s.position.set(st.wx, st.wy, st.wz);
@@ -347,11 +377,11 @@ function mountProp(prop) {
   const g = new THREE.Group();
   if (prop.kind === 'shelf') {
     // estante: duas laterais, prateleiras e o vão escuro no fundo
-    g.add(put(box(0.14, 1.7, 0.6, mat.furniture), -0.7, 0.85, 0));
-    g.add(put(box(0.14, 1.7, 0.6, mat.furniture), 0.7, 0.85, 0));
-    g.add(put(box(1.5, 0.12, 0.62, mat.furniture), 0, 1.7, 0));
+    g.add(put(box(0.14, 1.7, 0.6, mat.shelf), -0.7, 0.85, 0));
+    g.add(put(box(0.14, 1.7, 0.6, mat.shelf), 0.7, 0.85, 0));
+    g.add(put(box(1.5, 0.12, 0.62, mat.shelf), 0, 1.7, 0));
     g.add(put(box(1.4, 1.6, 0.1, mat.dark), 0, 0.85, -0.26));
-    for (let i = 0; i < 3; i++) g.add(put(box(1.36, 0.1, 0.58, mat.furniture), 0, 0.3 + i * 0.5, 0));
+    for (let i = 0; i < 3; i++) g.add(put(box(1.36, 0.1, 0.58, mat.shelf), 0, 0.3 + i * 0.5, 0));
   } else {
     // mesa: tampo, dois pés, a tela virada para quem trabalha e a cadeira
     g.add(put(box(1.9, 0.12, 1.0, mat.furniture), 0, 0.74, 0));

@@ -332,10 +332,13 @@ select:focus-visible, input:focus-visible {
   display: grid;
   place-items: center;
   /* grade da prancheta */
+  /* O fundo do palco é o "lado de fora" do diorama (ADR-0004): mais claro que o
+     azul de antes, para o escritório colorido assentar em algo, e ainda escuro o
+     bastante para os trilhos não sumirem. */
   background:
-    repeating-linear-gradient(0deg, var(--draft-grid) 0 1px, transparent 1px 40px),
-    repeating-linear-gradient(90deg, var(--draft-grid) 0 1px, transparent 1px 40px),
-    radial-gradient(120% 90% at 50% 0%, #0c1622 0%, var(--ink) 72%);
+    repeating-linear-gradient(0deg, rgb(255 255 255 / .022) 0 1px, transparent 1px 44px),
+    repeating-linear-gradient(90deg, rgb(255 255 255 / .022) 0 1px, transparent 1px 44px),
+    radial-gradient(130% 100% at 50% 10%, #1b3040 0%, #0e1a24 74%);
 }
 
 #scene {
@@ -363,20 +366,25 @@ select:focus-visible, input:focus-visible {
 }
 
 .tag3d.station {
+  /* Escuro sobre o piso claro: com o escritório colorido (ADR-0004), o rótulo claro
+     de antes desaparecia no ladrilho. */
   padding: 2px 6px;
-  color: var(--faint);
-  font: 500 var(--t-micro)/1.2 var(--mono);
+  color: hsl(200 22% 26%);
+  font: 600 var(--t-micro)/1.2 var(--mono);
   letter-spacing: .16em;
   text-transform: uppercase;
+  text-shadow: 0 1px 0 rgb(255 255 255 / .35);
 }
 
 .tag3d.prop {
+  /* Etiqueta de papel: fundo claro sobre a cena clara, texto escuro. */
   padding: 2px 6px;
-  background: color-mix(in srgb, var(--ink) 80%, transparent);
-  border: 1px solid var(--rule);
+  background: hsl(44 40% 94%);
+  border: 1px solid hsl(40 25% 66%);
   border-radius: 2px;
-  color: var(--text-2);
-  font: 400 var(--t-micro)/1.2 var(--mono);
+  color: hsl(30 30% 24%);
+  font: 500 var(--t-micro)/1.2 var(--mono);
+  box-shadow: 0 1px 2px rgb(0 0 0 / .25);
 }
 
 .tag3d.plate {

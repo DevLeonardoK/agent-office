@@ -25,3 +25,9 @@ creme, e essa é a única distinção dele. Ela cai. Os agentes agora são robô
 carcaça colorida, e a carcaça *é* o matiz: os subagents recebem os cinco matizes
 da paleta e o principal recebe um gradiente arco-íris. Rainbow não compete com
 os cinco porque não é um sexto matiz — é a ausência de escolha entre eles.
+
+## Atualização
+
+A parte cromática deste ADR — o prédio dessaturado como atalho para achar os
+agentes — foi revogada pelo ADR-0004, que troca o atalho por valor, distância de
+matiz e silhueta. O resto (um agente por cômodo, cinco por andar) continua valendo.

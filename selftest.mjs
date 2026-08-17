@@ -17,6 +17,7 @@ import {
   terrainRect, TERRAIN_MARGIN,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
+import { BUILDING, PROPS, AGENT_HUES, ERROR_HUE, BACKDROP, hueGap } from './public/palette.mjs';
 import { appendEvent, logPathFor } from './logstore.mjs';
 import { SESSION_TTL, openSession, isDead, liveSessions } from './sessions.mjs';
 import { buildSettings, HTTP_EVENTS } from './install-hooks.mjs';
@@ -1013,6 +1014,54 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
     const antes = terrainRect(createScene());
     return (t.x1 - t.x0) >= (antes.x1 - antes.x0);
   })());
+}
+
+// ── a paleta colorida ainda deixa achar o agente (ADR-0004) ────────────────
+{
+  // A invariante "desenho frio, gente quente" foi revogada: o prédio é colorido. O
+  // que substitui o atalho de leitura é distância de matiz e diferença de valor —
+  // e é isso que estas asserções seguram. Pintar uma parede da cor de um robô
+  // reprova aqui.
+  const MIN_ENTRE_AGENTES = 24;
+  const MIN_DO_FUNDO = 20;
+
+  ok('a paleta tem seis matizes de agente', AGENT_HUES.length === HUE_COUNT);
+
+  for (let i = 0; i < AGENT_HUES.length; i++) {
+    for (let j = i + 1; j < AGENT_HUES.length; j++) {
+      const d = hueGap(AGENT_HUES[i], AGENT_HUES[j]);
+      ok(`agentes ${AGENT_HUES[i]} e ${AGENT_HUES[j]} se distinguem`, d >= MIN_ENTRE_AGENTES, `${d}°`);
+    }
+  }
+
+  for (const h of AGENT_HUES) {
+    for (const fundo of BACKDROP) {
+      // Cinza não tem matiz que dispute: o que separa o robô ali é o valor.
+      if (fundo.s < 0.12) continue;
+      const d = hueGap(h, fundo.h);
+      ok(`agente ${h} se separa do fundo ${fundo.h}`, d >= MIN_DO_FUNDO, `${d}°`);
+    }
+  }
+
+  ok('nenhum agente se confunde com o rosto de erro',
+     AGENT_HUES.every((h) => hueGap(h, ERROR_HUE) >= 6), AGENT_HUES.map((h) => hueGap(h, ERROR_HUE)).join(','));
+
+  // Valor: o prédio é claro e o robô é de valor médio — é o que faz a carcaça
+  // destacar contra parede e piso.
+  ok('parede e piso são claros', BUILDING.wall.l >= 0.55 && BUILDING.floorA.l >= 0.7);
+  ok('o piso tem dois tons para o xadrez', BUILDING.floorA.l !== BUILDING.floorB.l || BUILDING.floorA.h !== BUILDING.floorB.h);
+
+  // Cada tipo de móvel tem cor própria: com mobília fixa, é a cor que distingue de
+  // longe. Nenhum par de tipos pode ter o mesmo matiz saturado.
+  const tipos = ['desk', 'shelf', 'terminal', 'library', 'whiteboard', 'cabinet'];
+  for (const t of tipos) ok(`o móvel ${t} tem cor na paleta`, !!PROPS[t]);
+  const saturados = tipos.map((t) => PROPS[t]).filter((c) => c.s >= 0.2);
+  for (let i = 0; i < saturados.length; i++) {
+    for (let j = i + 1; j < saturados.length; j++) {
+      ok(`móveis ${saturados[i].h} e ${saturados[j].h} se distinguem`, hueGap(saturados[i].h, saturados[j].h) >= 14,
+         `${hueGap(saturados[i].h, saturados[j].h)}°`);
+    }
+  }
 }
 
 // ── o renderizador ao menos analisa ───────────────────────────────────────
