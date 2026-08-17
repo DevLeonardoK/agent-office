@@ -8,118 +8,102 @@
 // estações singulares, e um 1º andar com cinco cômodos — um agente por cômodo,
 // e os móveis desse agente dentro do cômodo dele.
 
-// ── o mundo isométrico ────────────────────────────────────────────────────
+// ── o mundo 3D ────────────────────────────────────────────────────────────
 //
-// O prédio deixou de ser uma elevação de frente: agora é isométrico, como a
-// referência em `media-agents/escriotorio1.png`. Cada andar é uma plataforma
-// de ladrilhos em losango, e os andares se empilham no eixo vertical da tela.
+// O prédio é uma cena 3D (ADR-0003). A cena raciocina em **unidades de mundo** —
+// `wx` para o lado, `wz` para a profundidade, `wy` para a altura — e é ela quem
+// resolve toda a geometria: onde fica o cômodo, onde o robô pisa, por onde a
+// escada sobe. O renderizador recebe pontos prontos e não calcula nada.
 //
-// A cena raciocina em **coordenadas de mundo** — `(wx, wy)` em ladrilhos sobre
-// a plataforma, mais o andar — e projeta com `iso()`. Todo comando sai já
-// projetado em pixels, então o renderizador continua sem saber de geometria:
-// ele só recebe x/y de tela, como antes.
+// Um ladrilho é uma unidade. Andar é altura mais deslocamento: as plataformas
+// se escalonam em diagonal, de modo que nenhuma tape a de baixo.
 
-export const TILE = { w: 62, h: 31 };        // losango do ladrilho (2:1)
-export const LEVEL = 168;                    // quanto um andar sobe na tela
-export const PLATE = { x: 13, y: 8 };        // ladrilhos de uma plataforma
+export const TILE = 1;                        // uma unidade de mundo = um ladrilho
+export const LEVEL = 5.2;                     // altura de um andar
+export const STAGGER = { x: 3.2, z: -2.6 };   // o escalonamento diagonal por andar
+export const PLATE = { x: 13, z: 8 };         // os cômodos de um andar
+export const BAY = 4;                         // a baia da escada, à direita dos cômodos
+// Pé-direito desenhado. Baixo de propósito: parede alta, com a câmera inclinada,
+// projeta sobre o piso e tapa o cômodo — o andar virava uma faixa preta.
+export const WALL_H = 1.9;
 
-// O plano de desenho. A origem fica no topo, no meio: dali as plataformas
-// descem para a direita e para a esquerda.
-export const PLAN = { w: 1160, h: 900 };
-const ORIGIN = { x: PLAN.w / 2, y: 300 };
+// O térreo de serviço é o andar -1: plataforma maior, sempre presente, que não
+// conta agentes. É onde ficam as quatro estações e a porta do prédio.
+export const GROUND_FLOOR = -1;
+export const GROUND_PLATE = { x: PLATE.x + BAY, z: PLATE.z + 3 };
 
-/** Projeta um ponto do mundo (ladrilhos, andar) para o pixel na tela. */
-export function iso(wx, wy, floor = 0) {
-  return {
-    x: ORIGIN.x + (wx - wy) * (TILE.w / 2),
-    y: ORIGIN.y + (wx + wy) * (TILE.h / 2) - floor * LEVEL,
-  };
+/** A origem de uma plataforma no mundo. O escalonamento diagonal mora aqui. */
+export function platformOrigin(floor) {
+  return { x: floor * STAGGER.x, z: floor * STAGGER.z };
 }
 
+/** A altura do piso de um andar. */
+export const levelY = (floor) => floor * LEVEL;
+
+/** Ponto de mundo a partir de coordenadas locais da plataforma do andar. */
+export function world(lx, lz, floor) {
+  const o = platformOrigin(floor);
+  return { wx: o.x + lx, wy: levelY(floor), wz: o.z + lz, floor };
+}
+
+/** Quanto mede a plataforma de um andar. O térreo é maior. */
+export const plateOf = (floor) => (floor === GROUND_FLOOR ? GROUND_PLATE : { x: PLATE.x + BAY, z: PLATE.z });
+
 /**
- * Profundidade de um ponto: quem tem mais wx+wy está mais à frente e tapa quem
- * está atrás. O renderizador usa isto como z-index — sem ele, um robô no fundo
- * do cômodo apareceria por cima da parede da frente.
+ * O contorno da plataforma: um pentágono — o retângulo com o canto do fundo à
+ * direita chanfrado. É o chanfro que abre lugar para a escada e deixa a borda do
+ * andar de baixo à vista.
  */
-export const depth = (wx, wy, floor = 0) => Math.round((wx + wy) * 10 + floor * 1000);
+export function platformShape(floor) {
+  const p = plateOf(floor);
+  const cut = 2.6;
+  return [
+    world(0, 0, floor),
+    world(p.x - cut, 0, floor),
+    world(p.x, cut, floor),
+    world(p.x, p.z, floor),
+    world(0, p.z, floor),
+  ];
+}
 
-// O térreo de serviço é o andar -1: uma plataforma maior, sempre presente, que
-// não conta agentes. É onde ficam as quatro estações e a porta do prédio.
-export const GROUND_FLOOR = -1;
-export const GROUND_PLATE = { x: PLATE.x + 3, y: PLATE.y + 2 };
+// Entrada do prédio, na quina do térreo: quem chega de fora nasce aqui, e quem
+// sai do prédio caminha até aqui.
+export const DOOR = world(-1.6, GROUND_PLATE.z - 2, GROUND_FLOOR);
 
-// Entrada do prédio: o canto de quem chega de fora, no térreo.
-export const DOOR_TILE = { wx: -1.4, wy: GROUND_PLATE.y - 1.5, floor: GROUND_FLOOR };
-export const DOOR = iso(DOOR_TILE.wx, DOOR_TILE.wy, DOOR_TILE.floor);
-
-// As quatro estações canônicas (CONTEXT.md): recurso singular no prédio
-// inteiro, sempre no térreo. A chave delas é global — um só de cada.
-const stationAt = (wx, wy, label) => ({ ...iso(wx, wy, GROUND_FLOOR), wx, wy, label });
+// As quatro estações canônicas (CONTEXT.md): recurso singular no prédio inteiro,
+// sempre no térreo. A chave delas é global — há uma só de cada.
+const stationAt = (lx, lz, label) => ({ ...world(lx, lz, GROUND_FLOOR), label });
 export const STATIONS = {
-  terminal:   stationAt(2.2, 6.6, 'TERMINAL'),
-  library:    stationAt(5.6, 6.6, 'BIBLIOTECA'),
-  whiteboard: stationAt(9.0, 6.6, 'QUADRO'),
-  cabinet:    stationAt(12.4, 6.6, 'ARQUIVO MORTO'),
+  terminal:   stationAt(2.4, GROUND_PLATE.z - 4.8, 'TERMINAL'),
+  library:    stationAt(6.2, GROUND_PLATE.z - 4.8, 'BIBLIOTECA'),
+  whiteboard: stationAt(10.0, GROUND_PLATE.z - 4.8, 'QUADRO'),
+  cabinet:    stationAt(13.8, GROUND_PLATE.z - 4.8, 'ARQUIVO MORTO'),
 };
 
-// Cinco cômodos por andar, lado a lado ao longo do eixo wx da plataforma.
+// Cinco cômodos por andar, lado a lado ao longo de wx.
 export const ROOMS_PER_FLOOR = 5;
-const ROOM_TILES = PLATE.x / ROOMS_PER_FLOOR;   // 2,6 ladrilhos de frente
+const ROOM_W = PLATE.x / ROOMS_PER_FLOOR;
 
 // Cômodo reservado ao agente principal: sempre no andar 0, nunca reciclado.
 export const MAIN_ROOM = 0;
 
-// O elevador ocupa o fundo da plataforma (wy pequeno), na coluna do meio: de
-// lá a cabine desce até o térreo sem cruzar cômodo nenhum.
-export const SHAFT = { wx: PLATE.x / 2 - 1, wy: -1.6, w: 2, d: 1.4 };
-
-/**
- * O cômodo `slot` em ladrilhos: `{ wx, wy, w, d, floor }`, onde wx/wy é o canto
- * do fundo e w/d são frente e profundidade. Única fonte de geometria — quem
- * precisa de pixel chama `iso()` sobre isto.
- */
+/** O cômodo `slot` em coordenadas locais da plataforma, mais o andar. */
 export function roomTiles(slot) {
   const floor = Math.floor(slot / ROOMS_PER_FLOOR);
   const col = slot % ROOMS_PER_FLOOR;
-  const pad = 0.18;
-  return { wx: col * ROOM_TILES + pad, wy: pad, w: ROOM_TILES - pad * 2, d: PLATE.y - pad * 2, floor };
+  const pad = 0.2;
+  return { lx: col * ROOM_W + pad, lz: pad, w: ROOM_W - pad * 2, d: PLATE.z - pad * 2, floor, col };
 }
 
-/** Os quatro cantos do cômodo já projetados, para desenhar o losango do piso. */
+/** Os quatro cantos do piso do cômodo, no mundo. */
 export function roomQuad(slot) {
   const r = roomTiles(slot);
   return [
-    iso(r.wx, r.wy, r.floor),
-    iso(r.wx + r.w, r.wy, r.floor),
-    iso(r.wx + r.w, r.wy + r.d, r.floor),
-    iso(r.wx, r.wy + r.d, r.floor),
+    world(r.lx, r.lz, r.floor),
+    world(r.lx + r.w, r.lz, r.floor),
+    world(r.lx + r.w, r.lz + r.d, r.floor),
+    world(r.lx, r.lz + r.d, r.floor),
   ];
-}
-
-/** Caixa de tela que contém o cômodo inteiro — o que o enquadramento usa. */
-export function roomRect(slot) {
-  const q = roomQuad(slot);
-  const xs = q.map((p) => p.x), ys = q.map((p) => p.y);
-  const x = Math.min(...xs), y = Math.min(...ys);
-  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y, cx: (x + Math.max(...xs)) / 2 };
-}
-
-/** Caixa de tela de um andar inteiro: a plataforma mais a altura de pé-direito. */
-export function floorRect(floor) {
-  const pl = floor === GROUND_FLOOR ? GROUND_PLATE : PLATE;
-  const corners = [iso(0, 0, floor), iso(pl.x, 0, floor), iso(pl.x, pl.y, floor), iso(0, pl.y, floor)];
-  const xs = corners.map((p) => p.x), ys = corners.map((p) => p.y);
-  const x = Math.min(...xs) - 20, y = Math.min(...ys) - 96;   // 96 = parede do fundo
-  return { x, y, w: Math.max(...xs) - x + 20, h: Math.max(...ys) - y + 24 };
-}
-
-/** O prédio inteiro como está agora: do topo do último andar à base do térreo. */
-export function buildingRect(scene) {
-  const top = floorRect(floorCount(scene) - 1);
-  const base = floorRect(GROUND_FLOOR);
-  const x = Math.min(top.x, base.x);
-  const w = Math.max(top.x + top.w, base.x + base.w) - x;
-  return { x, y: top.y, w, h: base.y + base.h - top.y };
 }
 
 /** Quantos andares o prédio tem agora. Deriva da ocupação: andar vazio some. */
@@ -131,93 +115,86 @@ export function floorCount(scene) {
   return max + 1;
 }
 
-/** O poço, do último andar até o térreo, em caixa de tela. */
-export function shaftRect(scene) {
-  const top = iso(SHAFT.wx, SHAFT.wy, floorCount(scene) - 1);
-  const bottom = iso(SHAFT.wx + SHAFT.w, SHAFT.wy + SHAFT.d, GROUND_FLOOR);
-  return { x: top.x - TILE.w, y: top.y - 110, w: TILE.w * 2.4, h: bottom.y - top.y + 150 };
-}
-
 /**
- * A cabine parada num andar, como caixa isométrica: os quatro cantos do piso
- * dela mais a altura. O térreo é o andar -1 — o fundo do poço.
+ * A caixa do prédio inteiro no mundo, para a câmera enquadrar. Cresce com os
+ * andares e acompanha o escalonamento — sem isso o prédio sai de quadro para o
+ * lado conforme sobe.
  */
-export function cabinBox(floor) {
-  const { wx, wy, w, d } = SHAFT;
-  const h = 78;
-  return {
-    h,
-    floor: [iso(wx, wy, floor), iso(wx + w, wy, floor), iso(wx + w, wy + d, floor), iso(wx, wy + d, floor)],
-  };
-}
-
-/** Caixa de tela da cabine — o que o desenho e o teste usam para medir. */
-export function cabinRect(floor) {
-  const b = cabinBox(floor);
-  const xs = b.floor.map((p) => p.x), ys = b.floor.map((p) => p.y);
-  const x = Math.min(...xs), y = Math.min(...ys) - b.h;
-  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
-}
-
-/** O ladrilho de dentro da cabine, no andar dado. */
-export function cabinTile(floor) {
-  return { wx: SHAFT.wx + SHAFT.w / 2, wy: SHAFT.wy + SHAFT.d / 2, floor };
-}
-
-/** Onde o robô fica em pé dentro da cabine, em pixel. */
-export function cabinStand(floor) {
-  const t = cabinTile(floor);
-  return iso(t.wx, t.wy, t.floor);
-}
-
-/** Onde o robô fica parado no cômodo, em ladrilhos: no meio, um pouco à frente. */
-function roomHome(slot) {
-  const r = roomTiles(slot);
-  return { wx: r.wx + r.w / 2, wy: r.wy + r.d * 0.62, floor: r.floor };
+export function buildingBounds(scene) {
+  const floors = floorCount(scene);
+  let min = { x: Infinity, y: 0, z: Infinity };
+  let max = { x: -Infinity, y: 0, z: -Infinity };
+  for (let f = GROUND_FLOOR; f < floors; f++) {
+    for (const p of platformShape(f)) {
+      min.x = Math.min(min.x, p.wx); max.x = Math.max(max.x, p.wx);
+      min.z = Math.min(min.z, p.wz); max.z = Math.max(max.z, p.wz);
+    }
+  }
+  min.y = levelY(GROUND_FLOOR);
+  max.y = levelY(floors - 1) + WALL_H;
+  return { min, max };
 }
 
 // A faixa livre da frente da plataforma. Todo trajeto dentro de um andar passa
-// por ela: é o corredor, e é o que faz o robô contornar em vez de atravessar
-// os cômodos dos outros em linha reta.
-const LANE = PLATE.y - 0.55;
-const GROUND_LANE = GROUND_PLATE.y - 1.2;
+// por ela: é o corredor, e é o que faz o robô contornar em vez de atravessar os
+// cômodos dos outros.
+const LANE = PLATE.z - 0.6;
+const GROUND_LANE = GROUND_PLATE.z - 1.4;
 
-/** A porta do elevador num andar: o ladrilho à frente do poço. */
-function shaftDoor(floor) {
-  return { wx: SHAFT.wx + SHAFT.w / 2, wy: SHAFT.wy + SHAFT.d + 0.7, floor };
-}
+// ── a escada ──────────────────────────────────────────────────────────────
+//
+// Cada andar tem uma escada na baia à direita, ligando-o ao de baixo. Como as
+// plataformas são escalonadas, a escada vence o deslocamento diagonal além da
+// altura: ela sai do pé no andar de baixo e chega ao topo no andar de cima.
+
+export const STEPS = 9;                       // degraus por lance
+const stairFootLz = 5.6;                      // onde o lance encosta no andar de baixo
+const stairHeadLz = 1.8;                      // onde ele desembarca no andar de cima
+const stairLx = PLATE.x + BAY / 2;
+
+/** O pé do lance que sai de `floor` para `floor + 1`, no andar de baixo. */
+export const stairFoot = (floor) => world(stairLx, stairFootLz, floor);
+/** O topo do mesmo lance, já no andar de cima. */
+export const stairHead = (floor) => world(stairLx, stairHeadLz, floor + 1);
 
 /**
- * O caminho de um ponto a outro dentro do mesmo andar, em ladrilhos. Sai do
- * cômodo até o corredor, corre pelo corredor e sobe para o destino — em L, como
- * quem anda por um escritório de verdade. Pontos repetidos são descartados.
+ * Os degraus de um lance, do pé ao topo. Interpola posição e altura: como o
+ * andar de cima está deslocado na diagonal, o lance sobe torto no mundo — e é
+ * assim que ele aparece na referência.
  */
-function walkPath(from, to, lane) {
-  const pts = [];
-  const push = (wx, wy) => {
-    const last = pts[pts.length - 1] || from;
-    if (Math.abs(last.wx - wx) > 0.05 || Math.abs(last.wy - wy) > 0.05) pts.push({ wx, wy, floor: to.floor });
-  };
-  const sameLane = Math.abs(from.wy - to.wy) < 0.4;
-  const sameCol = Math.abs(from.wx - to.wx) < 0.4;
-  if (!sameLane && !sameCol) {
-    push(from.wx, lane);        // desce até o corredor
-    push(to.wx, lane);          // corre pelo corredor
+export function stairSteps(floor) {
+  const a = stairFoot(floor);
+  const b = stairHead(floor);
+  const out = [];
+  for (let i = 1; i <= STEPS; i++) {
+    const t = i / STEPS;
+    out.push({
+      wx: a.wx + (b.wx - a.wx) * t,
+      wy: a.wy + (b.wy - a.wy) * t,
+      wz: a.wz + (b.wz - a.wz) * t,
+      floor: t < 1 ? floor : floor + 1,
+    });
   }
-  push(to.wx, to.wy);           // entra no destino
-  return pts;
+  return out;
+}
+
+/** Onde o robô fica parado no cômodo: no meio, um pouco à frente. */
+function roomHome(slot) {
+  const r = roomTiles(slot);
+  return world(r.lx + r.w / 2, r.lz + r.d * 0.62, r.floor);
 }
 
 /**
- * A mobília fixa de um cômodo (issue #14). É do cômodo, não do agente: montada
- * quando o cômodo ganha ocupante, desmontada quando ele esvazia, e nunca criada
- * por uso de ferramenta. Usar uma ferramenta acende o móvel que já está lá.
+ * A mobília fixa de um cômodo (issue #14). É do cômodo, não do agente e não do
+ * evento: montada quando o cômodo ganha ocupante, desmontada quando ele esvazia,
+ * e nunca criada por uso de ferramenta. Usar uma ferramenta acende o móvel que
+ * já está lá.
  *
  * A mesa cobre arquivo e ferramenta sem casa própria; a estante cobre os
  * manuais. Os demais recursos são estações, singulares no térreo.
  */
 const ROOM_FURNITURE = [
-  { kind: 'desk', label: 'mesa', at: 0.30 },
+  { kind: 'desk', label: 'mesa', at: 0.3 },
   { kind: 'shelf', label: 'manuais', at: 0.72 },
 ];
 
@@ -230,11 +207,10 @@ function furnishRoom(scene, slot, cmds) {
   for (const f of ROOM_FURNITURE) {
     const key = roomPropKey(slot, f.kind);
     if (scene.props.has(key)) continue;
-    const wx = r.wx + r.w * f.at;
-    const wy = r.wy + r.d * 0.34;
+    const at = world(r.lx + r.w * f.at, r.lz + r.d * 0.28, r.floor);
     const p = {
-      kind: f.kind, key, label: f.label, room: 'CÔMODO', fixed: false, slot,
-      wx, wy, ...iso(wx, wy, r.floor), uses: 0, born: Date.now(),
+      kind: f.kind, key, label: f.label, room: 'CÔMODO', fixed: false, slot, ...at,
+      uses: 0, born: Date.now(),
     };
     scene.props.set(key, p);
     cmds.push({ op: 'prop-add', prop: p });
@@ -258,16 +234,19 @@ function roomPropFor(scene, slot, kind) {
 /** Onde o robô encosta para usar um móvel do próprio cômodo: logo à frente. */
 function standAt(prop, slot) {
   const r = roomTiles(slot);
-  return { wx: prop.wx, wy: Math.min(prop.wy + 0.75, r.wy + r.d - 0.4), floor: r.floor };
+  const o = platformOrigin(r.floor);
+  const lz = Math.min(prop.wz - o.z + 1.2, r.lz + r.d - 0.5);
+  return world(prop.wx - o.x, lz, r.floor);
 }
 
-// Onde o robô fica em pé no térreo para usar uma estação (issue #9). Ele desce
-// de elevador até aqui; `rank` desempata quem está na mesma estação ao mesmo
-// tempo, para dois robôs não se sobreporem sobre o mesmo símbolo.
+/**
+ * Onde o robô fica em pé no térreo para usar uma estação. `rank` desempata quem
+ * está na mesma estação ao mesmo tempo, para dois não se sobreporem.
+ */
 export function stationStand(station, rank = 0) {
   const side = rank % 2 === 0 ? 1 : -1;
-  const spread = Math.ceil(rank / 2) * 1.1;   // um ladrilho inteiro entre dois robôs
-  return { wx: station.wx + side * spread, wy: station.wy + 0.9, floor: GROUND_FLOOR };
+  const spread = Math.ceil(rank / 2) * 1.3;
+  return { wx: station.wx + side * spread, wy: station.wy, wz: station.wz + 1.5, floor: GROUND_FLOOR };
 }
 
 export function createScene() {
@@ -275,7 +254,6 @@ export function createScene() {
     agents: new Map(),
     props: new Map(),
     doorAgent: null,   // quem convocou por último: a porta de onde o próximo filho sai
-    cabinFloor: -1,    // onde a cabine do elevador está parada; -1 é o térreo
   };
 }
 
@@ -336,7 +314,7 @@ function parentDoor(scene, ev) {
   if (!parentId || parentId === ev.agentId) return null;
   const parent = scene.agents.get(parentId);
   if (!parent) return null;
-  return { wx: parent.wx + 0.7, wy: parent.wy, floor: parent.floor };
+  return { wx: parent.wx + 1.1, wy: parent.wy, wz: parent.wz, floor: parent.floor };
 }
 
 // ── agentes e móveis ──────────────────────────────────────────────────────
@@ -370,19 +348,17 @@ function ensureAgent(scene, id, type, cmds, entry) {
     // Um filho convocado nasce ao lado do pai (`entry`) e caminha dali até o
     // próprio cômodo. Sem pai no prédio, entra pela porta do térreo e sobe de
     // elevador; o principal já estava dentro e nasce no cômodo dele.
-    const start = entry || (isMain ? home : DOOR_TILE);
+    const start = entry || (isMain ? home : DOOR);
     a.wx = start.wx;
     a.wy = start.wy;
+    a.wz = start.wz;
     a.floor = start.floor;
-    const at = iso(a.wx, a.wy, a.floor);
-    a.x = at.x;
-    a.y = at.y;
     scene.agents.set(id, a);
     // Emitido aqui, e não só no spawn: o agente principal nunca dá spawn —
     // ele aparece no primeiro evento que gerar, e sem isto ficava invisível.
     // O ponto de entrada vai no comando, não só no objeto: o `moveTo` seguinte
     // sobrescreve `a.x`, e sem o retrato o renderizador perderia de onde partir.
-    cmds?.push({ op: 'agent-enter', agent: a, x: a.x, y: a.y });
+    cmds?.push({ op: 'agent-enter', agent: a, wx: a.wx, wy: a.wy, wz: a.wz });
   }
   if (type && type !== 'main') a.type = type;
   return a;
@@ -399,14 +375,38 @@ function ensureStation(scene, seed, cmds) {
   if (!p) {
     p = {
       ...seed, key: seed.key, room: station.label, fixed: true, owner: null,
-      // wx/wy vão junto: é deles que sai onde o robô fica em pé na estação.
-      x: station.x, y: station.y, wx: station.wx, wy: station.wy,
+      // O ponto de mundo vai junto: é dele que sai onde o robô fica em pé.
+      wx: station.wx, wy: station.wy, wz: station.wz, floor: GROUND_FLOOR,
       uses: 0, born: Date.now(),
     };
     scene.props.set(seed.key, p);
     cmds.push({ op: 'prop-add', prop: p });
   }
   return p;
+}
+
+/**
+ * O caminho de um ponto a outro dentro do mesmo andar. Sai do cômodo até o
+ * corredor da frente, corre pelo corredor e entra no destino — em L, como quem
+ * anda por um escritório de verdade. Pontos repetidos são descartados.
+ */
+function walkPath(from, to, lane) {
+  const floor = to.floor;
+  const laneZ = platformOrigin(floor).z + lane;
+  const y = levelY(floor);
+  const pts = [];
+  const push = (wx, wz) => {
+    const last = pts[pts.length - 1] || from;
+    if (Math.abs(last.wx - wx) > 0.05 || Math.abs(last.wz - wz) > 0.05) pts.push({ wx, wy: y, wz, floor });
+  };
+  const sameLane = Math.abs(from.wz - to.wz) < 0.5;
+  const sameCol = Math.abs(from.wx - to.wx) < 0.5;
+  if (!sameLane && !sameCol) {
+    push(from.wx, laneZ);
+    push(to.wx, laneZ);
+  }
+  push(to.wx, to.wz);
+  return pts;
 }
 
 /**
@@ -423,14 +423,12 @@ function walkAlong(scene, a, points, cmds, kind = 'walk') {
   let first = !a.pathOpen;
   a.pathOpen = true;
   for (const p of points) {
-    const at = iso(p.wx, p.wy, p.floor);
-    if (Math.abs(at.x - a.x) > 6) a.face = at.x > a.x ? 1 : -1;
+    if (Math.abs(p.wx - a.wx) > 0.1) a.face = p.wx > a.wx ? 1 : -1;
     a.wx = p.wx;
     a.wy = p.wy;
-    a.floor = p.floor;
-    a.x = at.x;
-    a.y = at.y;
-    cmds.push({ op: 'agent-move', id: a.id, x: at.x, y: at.y, face: a.face, kind, start: first });
+    a.wz = p.wz;
+    if (p.floor != null) a.floor = p.floor;
+    cmds.push({ op: 'agent-move', id: a.id, wx: a.wx, wy: a.wy, wz: a.wz, face: a.face, kind, start: first });
     first = false;
   }
 }
@@ -442,28 +440,26 @@ function moveTo(scene, a, target, cmds) {
 }
 
 /**
- * Viagem de elevador entre o cômodo e o térreo. Duas pernas: o robô entra na
- * cabine do próprio andar e a cabine desce (ou sobe) até o destino. O
- * renderizador encadeia as duas — é isso que faz o elevador ser visível em vez
- * de o robô cortar caminho na diagonal.
+ * Viagem entre andares pela escada (issue #16 começa aqui). O robô anda até o pé
+ * — ou o topo — do lance, sobe degrau a degrau (um comando por degrau, para o
+ * renderizador poder animar a subida) e caminha até o destino. Diferença de
+ * vários andares vira vários lances, um atrás do outro.
  */
-function elevatorTo(scene, a, target, cmds) {
+function stairsTo(scene, a, target, cmds) {
   const from = a.floor ?? Math.floor(a.room / ROOMS_PER_FLOOR);
   const to = target.floor;
-  const doorHere = shaftDoor(from);
-  const doorThere = shaftDoor(to);
+  const up = to > from;
 
-  // 1. anda até a porta do elevador do andar em que está
-  walkAlong(scene, a, walkPath(a, doorHere, from === GROUND_FLOOR ? GROUND_LANE : LANE), cmds);
-  // 2. entra na cabine
-  walkAlong(scene, a, [{ ...cabinTile(from) }], cmds, 'board');
-  // 3. desce (ou sobe) junto com a cabine
-  cmds.push({ op: 'cabin', from, to });
-  scene.cabinFloor = to;
-  walkAlong(scene, a, [{ ...cabinTile(to) }], cmds, 'ride');
-  // 4. sai da cabine e anda até o destino
-  walkAlong(scene, a, [doorThere], cmds, 'off');
-  walkAlong(scene, a, walkPath(doorThere, target, to === GROUND_FLOOR ? GROUND_LANE : LANE), cmds);
+  for (let f = from; up ? f < to : f > to; f += up ? 1 : -1) {
+    // Subindo, o lance é o que sai de f; descendo, o que chega a f.
+    const flight = up ? f : f - 1;
+    const board = up ? stairFoot(flight) : stairHead(flight);
+    const climb = up ? stairSteps(flight) : [...stairSteps(flight)].reverse().slice(1).concat([stairFoot(flight)]);
+
+    walkAlong(scene, a, walkPath(a, board, board.floor === GROUND_FLOOR ? GROUND_LANE : LANE), cmds);
+    walkAlong(scene, a, climb, cmds, 'stair');
+  }
+  walkAlong(scene, a, walkPath(a, target, to === GROUND_FLOOR ? GROUND_LANE : LANE), cmds);
 }
 
 // Volta o agente ao próprio cômodo, ocioso. De elevador se estava lá embaixo
@@ -476,7 +472,7 @@ function returnHome(scene, a, cmds, status = 'idle') {
   a.away = false;
   a.since = Date.now();
   const home = roomHome(a.room);
-  if (wasAway) elevatorTo(scene, a, home, cmds);
+  if (wasAway) stairsTo(scene, a, home, cmds);
   else moveTo(scene, a, home, cmds);
   cmds.push({ op: 'agent-state', agent: a });
 }
@@ -507,7 +503,7 @@ export function apply(scene, ev) {
       const home = roomHome(a.room);
       // Quem chega de fora entra pelo térreo e sobe de elevador; quem já estava
       // no prédio (o principal, ou um filho que sai da porta do pai) só anda.
-      if (a.floor !== home.floor) elevatorTo(scene, a, home, cmds);
+      if (a.floor !== home.floor) stairsTo(scene, a, home, cmds);
       else moveTo(scene, a, home, cmds);
       break;
     }
@@ -552,7 +548,7 @@ export function apply(scene, ev) {
         const rank = [...scene.agents.values()].filter((o) => o !== a && o.away && o.propKey === p.key).length;
         const spot = stationStand(p, rank);
         a.away = true;
-        elevatorTo(scene, a, spot, cmds);
+        stairsTo(scene, a, spot, cmds);
       } else {
         a.away = false;
         moveTo(scene, a, standAt(p, a.room), cmds);
@@ -573,7 +569,7 @@ export function apply(scene, ev) {
       a.status = 'leaving';
       a.tool = null;
       a.propKey = null;
-      moveTo(scene, a, DOOR_TILE, cmds);
+      moveTo(scene, a, DOOR, cmds);
       if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'result' });
       cmds.push({ op: 'agent-leave', id: a.id });
       // O cômodo esvaziou: a mobília dele é desmontada. As estações do térreo,
@@ -618,7 +614,6 @@ export function rebuild(scene, events) {
   scene.agents.clear();
   scene.props.clear();
   scene.doorAgent = null;
-  scene.cabinFloor = -1;
   const cmds = [];
   for (const ev of events || []) {
     for (const c of apply(scene, ev)) cmds.push({ ...c, instant: true });

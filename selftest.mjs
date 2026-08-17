@@ -9,9 +9,10 @@
 //   node selftest.mjs
 
 import {
-  createScene, apply, rebuild, roomRect, roomQuad, ROOMS_PER_FLOOR,
-  DOOR, STATIONS, MAIN_ROOM, floorCount, floorRect, buildingRect, PLAN,
-  SHAFT, shaftRect, cabinRect, cabinStand, iso, PLATE, GROUND_FLOOR, GROUND_PLATE,
+  createScene, apply, rebuild, roomTiles, roomQuad, ROOMS_PER_FLOOR,
+  DOOR, STATIONS, MAIN_ROOM, floorCount, buildingBounds, platformShape, platformOrigin,
+  plateOf, world, levelY, stairSteps, stairFoot, stairHead, STEPS, LEVEL, STAGGER,
+  PLATE, GROUND_FLOOR, GROUND_PLATE, WALL_H,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { appendEvent, logPathFor } from './logstore.mjs';
@@ -40,36 +41,30 @@ const furniture = (s, slot) => [...s.props.values()].filter((p) => p.slot === sl
 const roomProp = (s, slot, kind) => s.props.get(`room${slot}|${kind}`);
 
 // ── invariantes de layout ──────────────────────────────────────────────────
+//
+// O mundo é 3D (ADR-0003): as asserções falam de unidades de mundo, não de
+// pixels. Um ponto pertence a um cômodo quando cai dentro do retângulo local
+// daquele cômodo, no andar dele.
 
-// O cômodo é um losango, não um retângulo: ponto-dentro-de-polígono, com uma
-// folga para o robô que encosta na beirada do piso.
-function insideRoom(x, y, i, pad = 26) {
-  const q = roomQuad(i);
-  let inside = false;
-  for (let a = 0, b = q.length - 1; a < q.length; b = a++) {
-    const hit = (q[a].y > y) !== (q[b].y > y) &&
-      x < ((q[b].x - q[a].x) * (y - q[a].y)) / (q[b].y - q[a].y) + q[a].x;
-    if (hit) inside = !inside;
-  }
-  if (inside) return true;
-  // Beirada: aceita o que está a menos de `pad` do losango.
-  const cx = q.reduce((t, p) => t + p.x, 0) / 4;
-  const cy = q.reduce((t, p) => t + p.y, 0) / 4;
-  const shrunk = q.map((p) => ({ x: p.x + Math.sign(cx - p.x) * -pad, y: p.y + Math.sign(cy - p.y) * -pad }));
-  let grown = false;
-  for (let a = 0, b = shrunk.length - 1; a < shrunk.length; b = a++) {
-    const hit = (shrunk[a].y > y) !== (shrunk[b].y > y) &&
-      x < ((shrunk[b].x - shrunk[a].x) * (y - shrunk[a].y)) / (shrunk[b].y - shrunk[a].y) + shrunk[a].x;
-    if (hit) grown = !grown;
-  }
-  return grown;
+const localOf = (p, floor) => {
+  const o = platformOrigin(floor);
+  return { lx: p.wx - o.x, lz: p.wz - o.z };
+};
+
+function insideRoom(p, slot, pad = 0.6) {
+  const r = roomTiles(slot);
+  if (Math.abs((p.wy ?? levelY(r.floor)) - levelY(r.floor)) > 0.35) return false;
+  const l = localOf(p, r.floor);
+  return l.lx >= r.lx - pad && l.lx <= r.lx + r.w + pad &&
+         l.lz >= r.lz - pad && l.lz <= r.lz + r.d + pad;
 }
 
-// A caixa do térreo de serviço, onde os robôs ficam quando descem às estações.
-const groundBox = floorRect(GROUND_FLOOR);
-const onGround = (x, y) =>
-  x >= groundBox.x - 40 && x <= groundBox.x + groundBox.w + 40 &&
-  y >= groundBox.y && y <= groundBox.y + groundBox.h + 40;
+/** No térreo de serviço: no andar -1 e dentro da plataforma dele. */
+function onGround(p, pad = 2) {
+  if (Math.abs(p.wy - levelY(GROUND_FLOOR)) > 0.35) return false;
+  const l = localOf(p, GROUND_FLOOR);
+  return l.lx >= -pad && l.lx <= GROUND_PLATE.x + pad && l.lz >= -pad && l.lz <= GROUND_PLATE.z + pad;
+}
 
 /** Devolve a lista de invariantes violadas na cena. Vazia = tudo em ordem. */
 function violations(s) {
@@ -84,8 +79,7 @@ function violations(s) {
     if (a.room == null || a.room < 0 || !Number.isInteger(a.room)) bad.push(`agente ${a.id} sem cômodo válido`);
   }
 
-  // Nenhum andar excede cinco agentes; nenhum andar vazio existe entre o térreo
-  // e o topo (o prédio cresce e encolhe sem deixar andar oco no meio).
+  // Nenhum andar excede cinco agentes; nenhum andar vazio entre o térreo e o topo.
   const perFloor = new Map();
   for (const a of agents) {
     const f = Math.floor(a.room / ROOMS_PER_FLOOR);
@@ -97,31 +91,27 @@ function violations(s) {
     for (let f = 0; f <= maxF; f++) if (!perFloor.has(f)) bad.push(`andar ${f} vazio abaixo do topo`);
   }
 
-  // Todo robô está no seu cômodo — ou no térreo, quando desce para usar uma
-  // estação (issue #9). Nunca num terceiro lugar.
+  // Todo robô está no seu cômodo, no térreo (usando estação), ou na escada.
   for (const a of agents) {
-    const atGround = onGround(a.x, a.y);
-    const placed = a.away ? atGround : insideRoom(a.x, a.y, a.room);
-    if (!placed) bad.push(`robô ${a.id} nem no cômodo ${a.room} nem no térreo`);
+    const onStair = Math.abs(a.wy - levelY(a.floor ?? 0)) > 0.2;
+    const placed = a.away ? onGround(a) : insideRoom(a, a.room) || onGround(a) || onStair;
+    if (!placed) bad.push(`robô ${a.id} nem no cômodo ${a.room} nem no térreo nem na escada`);
   }
 
   // Nenhum robô se sobrepõe a outro.
   for (let i = 0; i < agents.length; i++) {
     for (let j = i + 1; j < agents.length; j++) {
-      if (Math.hypot(agents[i].x - agents[j].x, agents[i].y - agents[j].y) < 24) {
-        bad.push(`robôs ${agents[i].id} e ${agents[j].id} sobrepostos`);
-      }
+      const d = Math.hypot(agents[i].wx - agents[j].wx, agents[i].wy - agents[j].wy, agents[i].wz - agents[j].wz);
+      if (d < 0.9) bad.push(`robôs ${agents[i].id} e ${agents[j].id} sobrepostos`);
     }
   }
 
   // Todo móvel de cômodo dentro do cômodo do dono; toda estação no térreo.
   for (const p of s.props.values()) {
     if (p.fixed) {
-      if (!onGround(p.x, p.y)) bad.push(`estação ${p.key} fora do térreo`);
-    } else {
-      const owner = s.agents.get(p.owner);
-      if (!owner) continue;   // dono já saiu; o móvel some com ele no render
-      if (!insideRoom(p.x, p.y, owner.room)) bad.push(`móvel ${p.key} fora do cômodo do dono`);
+      if (!onGround(p)) bad.push(`estação ${p.key} fora do térreo`);
+    } else if (!insideRoom(p, p.slot)) {
+      bad.push(`móvel ${p.key} fora do cômodo ${p.slot}`);
     }
   }
   return bad;
@@ -142,7 +132,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
 
   const a = s.agents.get('a1');
   const p = roomProp(s, a.room, 'desk');
-  ok('a mesa nasceu com o cômodo', p && p.slot === a.room && insideRoom(p.x, p.y, a.room));
+  ok('a mesa nasceu com o cômodo', p && p.slot === a.room && insideRoom(p, a.room));
   ok('a mobília chegou com o ocupante', cmdsOf(c1, 'prop-add').length === 2);
   ok('status vira trabalhando', a.status === 'working' && a.tool === 'Read');
   { const v = invariantsHold(s); ok('invariantes valem com um agente', v.ok, v.detail); }
@@ -177,8 +167,8 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('cada um usa a mesa do próprio cômodo',
      a1.propKey === `room${a1.room}|desk` && a2.propKey === `room${a2.room}|desk`);
   ok('a mesa de cada cômodo está dentro dele',
-     insideRoom(roomProp(s, a1.room, 'desk').x, roomProp(s, a1.room, 'desk').y, a1.room) &&
-     insideRoom(roomProp(s, a2.room, 'desk').x, roomProp(s, a2.room, 'desk').y, a2.room));
+     insideRoom(roomProp(s, a1.room, 'desk'), a1.room) &&
+     insideRoom(roomProp(s, a2.room, 'desk'), a2.room));
   ok('o arquivo tocado fica no agente, para o elenco', a1.subject === 'shared.ts');
   ok('os dois estão em cômodos diferentes', a1.room !== a2.room);
   { const v = invariantsHold(s); ok('invariantes valem com dois agentes', v.ok, v.detail); }
@@ -211,7 +201,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('o cômodo tem a mobília fixa e nada mais', antes === 2);
   ok('nenhum móvel guarda nome de arquivo', ![...s.props.keys()].some((k) => k.includes('.ts')));
   ok('o último arquivo tocado fica no agente', s.agents.get('main').subject === 'm39.ts');
-  const fora = furniture(s, main.room).filter((p) => !insideRoom(p.x, p.y, main.room));
+  const fora = furniture(s, main.room).filter((p) => !insideRoom(p, main.room));
   ok('nenhum móvel escapa do cômodo', fora.length === 0, `${fora.length} fora`);
   { const v = invariantsHold(s); ok('invariantes valem depois de 40 ferramentas', v.ok, v.detail); }
 }
@@ -239,8 +229,8 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   for (const [kind, st] of Object.entries(STATIONS)) {
     apply(s, evt({ kind: 'tool_start', tool: 'X', prop: { kind, key: kind, label: kind } }));
     const p = s.props.get(kind);
-    ok(`${kind} ancora em ${st.label}`, p.x === st.x && p.y === st.y && p.fixed);
-    ok(`${kind} está no térreo`, onGround(p.x, p.y));
+    ok(`${kind} ancora em ${st.label}`, p.wx === st.wx && p.wy === st.wy && p.wz === st.wz && p.fixed);
+    ok(`${kind} está no térreo`, onGround(p));
   }
   // Dois agentes usando o terminal compartilham a mesma estação global.
   apply(s, evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }));
@@ -257,16 +247,16 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
 
   const c = apply(s, evt({ kind: 'spawn', agentId: 'ag-1', agentType: 'Explore' }));
   const enter = cmdsOf(c, 'agent-enter')[0];
-  ok('o filho nasce ao lado do pai', enter && Math.hypot(enter.x - pai.x, enter.y - pai.y) < 60,
-     `enter=(${enter?.x},${enter?.y}) pai=(${pai.x},${pai.y})`);
+  ok('o filho nasce ao lado do pai', enter && Math.hypot(enter.wx - pai.wx, enter.wz - pai.wz) < 2,
+     `enter=(${enter?.wx},${enter?.wz}) pai=(${pai.wx},${pai.wz})`);
 
   const move = cmdsOf(c, 'agent-move')[0];
-  ok('e caminha dali até o próprio cômodo', move && (move.x !== enter.x || move.y !== enter.y),
-     `move=(${move?.x},${move?.y})`);
+  ok('e caminha dali até o próprio cômodo', move && (move.wx !== enter.wx || move.wz !== enter.wz),
+     `move=(${move?.wx},${move?.wz})`);
 
   const filho = s.agents.get('ag-1');
-  ok('o cômodo do filho não é o do pai', Math.hypot(filho.x - pai.x, filho.y - pai.y) > 24,
-     `filho=(${filho.x},${filho.y})`);
+  ok('o cômodo do filho não é o do pai', filho.room !== s.agents.get('main').room,
+     `filho=${filho.room} pai=${s.agents.get('main').room}`);
   ok('a linhagem não cria móvel: só a mobília dos dois cômodos', s.props.size === 4);
 }
 
@@ -287,7 +277,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
   const room1 = s.agents.get('a1').room;
   const c = apply(s, evt({ kind: 'stop', agentId: 'a1', agentType: 'Explore', text: 'achei 4 handlers' }));
-  ok('sai andando até a porta', cmdsOf(c, 'agent-move').some((m) => m.x === DOOR.x));
+  ok('sai andando até a porta', cmdsOf(c, 'agent-move').some((m) => Math.abs(m.wx - DOOR.wx) < 0.01));
   ok('fala antes de sumir', cmdsOf(c, 'say').length === 1);
   ok('some do elenco', !s.agents.has('a1'));
 
@@ -316,7 +306,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const s = createScene();
   apply(s, evt({ kind: 'prompt', text: 'oi' }));
   const main = s.agents.get('main');
-  ok('o principal ocupa um cômodo do 1º andar', main.room >= 0 && main.room < ROOMS_PER_FLOOR && insideRoom(main.x, main.y, main.room));
+  ok('o principal ocupa um cômodo do 1º andar', main.room >= 0 && main.room < ROOMS_PER_FLOOR && insideRoom(main, main.room));
 }
 
 // ── o sexto agente inaugura o 2º andar (issue #7) ───────────────────────────
@@ -376,7 +366,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   for (let i = 0; i < ROOMS_PER_FLOOR + 1; i++) apply(s, evt({ kind: 'stop', agentId: 'sub' + i, agentType: 'Explore', text: 'tchau' }));
   const main = s.agents.get('main');
   ok('o endereço do principal ficou constante', main.room === addr && main.room === MAIN_ROOM);
-  ok('o principal segue no 1º andar', Math.floor(main.room / ROOMS_PER_FLOOR) === 0 && insideRoom(main.x, main.y, main.room));
+  ok('o principal segue no 1º andar', Math.floor(main.room / ROOMS_PER_FLOOR) === 0 && insideRoom(main, main.room));
 }
 
 // ── o principal chega depois dos subagentes e ainda pega o cômodo dele ───────
@@ -396,30 +386,8 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const novo = s.agents.get(squatter.id).room;
   ok('o cômodo novo do realocado está mobiliado', furniture(s, novo).length === 2);
   ok('a mobília do realocado fica dentro do cômodo novo',
-     furniture(s, novo).every((p) => insideRoom(p.x, p.y, novo)));
+     furniture(s, novo).every((p) => insideRoom(p, novo)));
   { const v = invariantsHold(s); ok('invariantes valem após o principal chegar tarde', v.ok, v.detail); }
-}
-
-// ── elevador até a estação: o robô desce ao térreo e volta (issue #9) ────────
-{
-  const s = createScene();
-  apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
-  const room = s.agents.get('a1').room;
-
-  const c = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }));
-  const a = s.agents.get('a1');
-  ok('usar estação marca o robô como fora', a.away === true);
-  ok('o robô desce ao térreo', onGround(a.x, a.y), `x=${a.x} y=${a.y}`);
-  ok('o robô encosta na estação do térreo', Math.abs(a.x - STATIONS.terminal.x) < 60, `x=${a.x}`);
-  ok('o cômodo do robô continua reservado', a.room === room);
-  ok('a viagem até a estação é de elevador', cmdsOf(c, 'agent-move').some((m) => m.kind === 'ride'));
-  { const v = invariantsHold(s); ok('invariantes valem com o robô na estação', v.ok, v.detail); }
-
-  const back = apply(s, evt({ kind: 'tool_end', agentId: 'a1', agentType: 'Explore', tool: 'Bash' }));
-  const a2 = s.agents.get('a1');
-  ok('ao terminar, o robô deixa de estar fora', a2.away === false);
-  ok('o robô volta para o próprio cômodo', insideRoom(a2.x, a2.y, a2.room));
-  ok('a volta também é de elevador', cmdsOf(back, 'agent-move').some((m) => m.kind === 'ride'));
 }
 
 // ── usar móvel (não estação) continua dentro do cômodo (issue #9) ────────────
@@ -428,7 +396,168 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
   apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('x.ts') }));
   const a = s.agents.get('a1');
-  ok('móvel do cômodo não manda o robô ao térreo', a.away === false && insideRoom(a.x, a.y, a.room));
+  ok('móvel do cômodo não manda o robô ao térreo', a.away === false && insideRoom(a, a.room));
+}
+
+// ── a porta do pai: o filho surge no cômodo de quem o convocou ────────────
+{
+  const s = createScene();
+  // o principal convoca um subagente: caminha até a porta e fica lá.
+  apply(s, evt({ kind: 'tool_start', tool: 'Task', prop: { kind: 'door', key: 'door', label: 'porta' } }));
+  const pai = s.agents.get('main');
+
+  const c = apply(s, evt({ kind: 'spawn', agentId: 'ag-1', agentType: 'Explore' }));
+  const enter = cmdsOf(c, 'agent-enter')[0];
+  ok('o filho nasce ao lado do pai', enter && Math.hypot(enter.wx - pai.wx, enter.wz - pai.wz) < 2,
+     `enter=(${enter?.wx},${enter?.wz}) pai=(${pai.wx},${pai.wz})`);
+
+  const move = cmdsOf(c, 'agent-move')[0];
+  ok('e caminha dali até o próprio cômodo', move && (move.wx !== enter.wx || move.wz !== enter.wz),
+     `move=(${move?.wx},${move?.wz})`);
+
+  const filho = s.agents.get('ag-1');
+  ok('o cômodo do filho não é o do pai', filho.room !== s.agents.get('main').room,
+     `filho=${filho.room} pai=${s.agents.get('main').room}`);
+  ok('a linhagem não cria móvel: só a mobília dos dois cômodos', s.props.size === 4);
+}
+
+// ── pai que já saiu não quebra a chegada do filho ─────────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'tool_start', tool: 'Task', prop: { kind: 'door', key: 'door', label: 'porta' } }));
+  apply(s, evt({ kind: 'stop', agentId: 'main' }));   // o pai vai embora antes do filho chegar
+  const c = apply(s, evt({ kind: 'spawn', agentId: 'ag-1', agentType: 'Explore' }));
+  const enter = cmdsOf(c, 'agent-enter')[0];
+  ok('sem pai no prédio, o filho entra pela porta do prédio', enter && enter.x === DOOR.x && enter.y === DOOR.y,
+     `enter=(${enter?.x},${enter?.y})`);
+}
+
+// ── saída libera o cômodo, que é reciclado ──────────────────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
+  const room1 = s.agents.get('a1').room;
+  const c = apply(s, evt({ kind: 'stop', agentId: 'a1', agentType: 'Explore', text: 'achei 4 handlers' }));
+  ok('sai andando até a porta', cmdsOf(c, 'agent-move').some((m) => Math.abs(m.wx - DOOR.wx) < 0.01));
+  ok('fala antes de sumir', cmdsOf(c, 'say').length === 1);
+  ok('some do elenco', !s.agents.has('a1'));
+
+  apply(s, evt({ kind: 'spawn', agentId: 'a2', agentType: 'Plan' }));
+  ok('o próximo recicla a vaga', s.agents.get('a2').room === room1);
+}
+
+// ── reconstrução a partir do log (recarregar / trocar de sessão) ──────────
+{
+  const events = [
+    evt({ kind: 'tool_start', agentId: 'main', agentType: 'main', tool: 'Read', prop: deskProp('velho.ts') }),
+    evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }),
+    evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }),
+  ];
+  const s = createScene();
+  const c = rebuild(s, events);
+  ok('rebuild monta a mobília dos cômodos e a estação usada', s.props.size === 5);
+  ok('rebuild monta os agentes do log', s.agents.size === 2);
+  ok('rebuild entra instantâneo', cmdsOf(c, 'agent-enter').every((e) => e.instant === true));
+  ok('rebuild não anima o movimento', cmdsOf(c, 'agent-move').every((m) => m.instant === true));
+}
+
+
+// ── o cômodo do principal fica no 1º andar ──────────────────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'prompt', text: 'oi' }));
+  const main = s.agents.get('main');
+  ok('o principal ocupa um cômodo do 1º andar', main.room >= 0 && main.room < ROOMS_PER_FLOOR && insideRoom(main, main.room));
+}
+
+// ── o sexto agente inaugura o 2º andar (issue #7) ───────────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
+
+  ok('seis agentes cabem no prédio', s.agents.size === 6);
+  ok('o 1º andar ainda tem exatamente cinco', [...s.agents.values()].filter((a) => Math.floor(a.room / ROOMS_PER_FLOOR) === 0).length === ROOMS_PER_FLOOR);
+  ok('o sexto abre o 2º andar', floorCount(s) === 2 && [...s.agents.values()].some((a) => Math.floor(a.room / ROOMS_PER_FLOOR) === 1));
+  { const v = invariantsHold(s); ok('invariantes valem com dois andares', v.ok, v.detail); }
+}
+
+// ── o cômodo é esvaziado dos móveis do ocupante anterior (issue #7) ──────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
+  apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('velho.ts') }));
+  const room1 = s.agents.get('a1').room;
+  ok('o cômodo do primeiro está mobiliado', furniture(s, room1).length === 2);
+
+  const c2 = apply(s, evt({ kind: 'stop', agentId: 'a1', agentType: 'Explore', text: 'saí' }));
+  ok('a saída desmobilia o cômodo', furniture(s, room1).length === 0 && cmdsOf(c2, 'prop-remove').length === 2);
+
+  apply(s, evt({ kind: 'spawn', agentId: 'a2', agentType: 'Plan' }));
+  apply(s, evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'Read', prop: deskProp('novo.ts') }));
+  ok('o próximo recicla a vaga já vazia', s.agents.get('a2').room === room1);
+  ok('o cômodo reciclado é remobiliado do zero', furniture(s, room1).length === 2 && !s.agents.get('a2').subject === false);
+  { const v = invariantsHold(s); ok('invariantes valem após reciclar a vaga', v.ok, v.detail); }
+}
+
+// ── andar sem ocupantes é demolido (issue #7) ───────────────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
+  ok('o prédio tem dois andares com seis agentes', floorCount(s) === 2);
+
+  // Some o único ocupante do 2º andar; o andar deixa de existir.
+  const upstairs = [...s.agents.values()].find((a) => Math.floor(a.room / ROOMS_PER_FLOOR) === 1);
+  apply(s, evt({ kind: 'stop', agentId: upstairs.id, agentType: upstairs.type, text: 'saí' }));
+  ok('o 2º andar é demolido ao esvaziar', floorCount(s) === 1);
+  ok('ninguém sobra acima do 1º andar', ![...s.agents.values()].some((a) => a.room >= ROOMS_PER_FLOOR));
+  { const v = invariantsHold(s); ok('invariantes valem após demolir o andar', v.ok, v.detail); }
+}
+
+// ── o endereço do cômodo do principal não muda a sessão inteira (issue #7) ───
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
+  const addr = s.agents.get('main').room;
+  ok('o principal nasce no cômodo reservado', addr === MAIN_ROOM);
+
+  // Enche o prédio, abre e demole o 2º andar, tudo em volta do principal.
+  for (let i = 0; i < ROOMS_PER_FLOOR + 1; i++) apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
+  for (let i = 0; i < ROOMS_PER_FLOOR + 1; i++) apply(s, evt({ kind: 'stop', agentId: 'sub' + i, agentType: 'Explore', text: 'tchau' }));
+  const main = s.agents.get('main');
+  ok('o endereço do principal ficou constante', main.room === addr && main.room === MAIN_ROOM);
+  ok('o principal segue no 1º andar', Math.floor(main.room / ROOMS_PER_FLOOR) === 0 && insideRoom(main, main.room));
+}
+
+// ── o principal chega depois dos subagentes e ainda pega o cômodo dele ───────
+{
+  const s = createScene();
+  // Cinco subagentes tomam o andar antes de o principal aparecer.
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
+    apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
+    apply(s, evt({ kind: 'tool_start', agentId: 'sub' + i, agentType: 'Explore', tool: 'Read', prop: deskProp('f' + i + '.ts') }));
+  }
+  const squatter = [...s.agents.values()].find((a) => a.room === MAIN_ROOM);
+  const c = apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'cheguei' }));
+  const main = s.agents.get('main');
+  ok('o principal toma o cômodo reservado', main.room === MAIN_ROOM);
+  ok('o invasor foi realocado', s.agents.get(squatter.id).room !== MAIN_ROOM);
+  // A mobília é do cômodo: o realocado deixa a do antigo e encontra a do novo.
+  const novo = s.agents.get(squatter.id).room;
+  ok('o cômodo novo do realocado está mobiliado', furniture(s, novo).length === 2);
+  ok('a mobília do realocado fica dentro do cômodo novo',
+     furniture(s, novo).every((p) => insideRoom(p, novo)));
+  { const v = invariantsHold(s); ok('invariantes valem após o principal chegar tarde', v.ok, v.detail); }
+}
+
+// ── usar móvel (não estação) continua dentro do cômodo (issue #9) ────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
+  apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('x.ts') }));
+  const a = s.agents.get('a1');
+  ok('móvel do cômodo não manda o robô ao térreo', a.away === false && insideRoom(a, a.room));
 }
 
 // ── dois robôs na mesma estação não se sobrepõem (issue #9) ──────────────────
@@ -439,8 +568,8 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   apply(s, evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'Bash', prop: term }));
   const a1 = s.agents.get('a1');
   const a2 = s.agents.get('a2');
-  ok('os dois na estação, no térreo', a1.away && a2.away && onGround(a1.x, a1.y) && onGround(a2.x, a2.y));
-  ok('os dois não se sobrepõem na estação', Math.hypot(a1.x - a2.x, a1.y - a2.y) > 24, `a1=${a1.x} a2=${a2.x}`);
+  ok('os dois na estação, no térreo', a1.away && a2.away && onGround(a1) && onGround(a2));
+  ok('os dois não se sobrepõem na estação', Math.hypot(a1.wx - a2.wx, a1.wz - a2.wz) > 0.9, `a1=${a1.wx} a2=${a2.wx}`);
   { const v = invariantsHold(s); ok('invariantes valem com dois na estação', v.ok, v.detail); }
 }
 
@@ -601,77 +730,98 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('mas acrescenta o nosso', withOther.hooks.PreToolUse.some((g) => g.hooks.some((x) => x.type === 'http')));
 }
 
-// ── enquadramento das vistas: corte vertical e andar cheio (issue #11) ─────
+// ── o prédio 3D: plataformas pentagonais escalonadas (issue #15) ───────────
 {
   const s = createScene();
   apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
 
-  // Vista empilhada com um andar: cobre o andar 0 e o térreo inteiro.
-  const b1 = buildingRect(s);
-  ok('o corte vertical cobre a planta toda', b1.w > 0 && b1.h > 0 && b1.w <= PLAN.w + 80);
-  ok('o corte vertical desce até o térreo', b1.y + b1.h >= groundBox.y + groundBox.h - 1);
-  ok('o corte vertical cobre o 1º andar', b1.y <= roomRect(0).y);
+  // Cada plataforma é um pentágono: o retângulo com o canto do fundo chanfrado.
+  ok('a plataforma é um pentágono', platformShape(0).length === 5);
+  ok('o chanfro está no canto do fundo à direita', (() => {
+    const p = platformShape(0);
+    const o = platformOrigin(0);
+    const plate = plateOf(0);
+    // o segundo e o terceiro vértice formam o corte, entre o topo e a lateral
+    return p[1].wx - o.x < plate.x && p[2].wz - o.z > 0 && p[2].wx - o.x === plate.x;
+  })());
 
-  // O andar cheio enquadra os cinco cômodos daquele andar, e só eles.
-  const f0 = floorRect(0);
-  for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
-    const r = roomRect(i);
-    ok(`o andar cheio contém o cômodo ${i}`, r.y >= f0.y && r.y + r.h <= f0.y + f0.h && r.x >= f0.x && r.x + r.w <= f0.x + f0.w);
-  }
-  ok('o andar cheio não desce ao térreo', f0.y + f0.h < groundBox.y + groundBox.h);
-  ok('o andar cheio é mais baixo que o prédio de um andar', f0.h < b1.h);
+  // Escalonamento diagonal: o andar de cima nasce deslocado, e mais alto.
+  const o0 = platformOrigin(0);
+  const o1 = platformOrigin(1);
+  ok('o andar de cima é deslocado na diagonal', o1.x !== o0.x && o1.z !== o0.z);
+  ok('o deslocamento é o mesmo em todo andar', o1.x - o0.x === STAGGER.x && o1.z - o0.z === STAGGER.z);
+  ok('o andar de cima fica mais alto', levelY(1) - levelY(0) === LEVEL);
+  ok('o térreo fica abaixo do 1º andar', levelY(GROUND_FLOOR) < levelY(0));
+  ok('o térreo é a plataforma maior', plateOf(GROUND_FLOOR).z > plateOf(0).z);
 
-  // O sexto agente abre o 2º andar: o corte vertical cresce para cima.
+  // A caixa do prédio cresce com o andar novo e acompanha o escalonamento.
+  const b1 = buildingBounds(s);
+  ok('a caixa do prédio cobre o térreo', b1.min.y <= levelY(GROUND_FLOOR));
+  ok('a caixa do prédio cobre o topo', b1.max.y >= levelY(0) + WALL_H);
+
   for (let i = 0; i < ROOMS_PER_FLOOR; i++) apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
-  const b2 = buildingRect(s);
+  const b2 = buildingBounds(s);
   ok('o prédio tem dois andares', floorCount(s) === 2);
-  ok('o corte vertical sobe com o andar novo', b2.y < b1.y && b2.h > b1.h);
-  ok('o corte vertical cobre o andar de cima', b2.y <= floorRect(1).y);
-
-  // Andares não se sobrepõem: cada um é uma faixa própria, de baixo para cima.
-  ok('o andar de cima fica acima do de baixo', floorRect(1).y < floorRect(0).y);
-  ok('todo robô cabe no enquadramento do prédio',
-     [...s.agents.values()].every((a) => a.y >= b2.y && a.y <= b2.y + b2.h));
+  ok('a caixa sobe com o andar novo', b2.max.y > b1.max.y);
+  ok('a caixa acompanha o deslocamento diagonal', b2.max.x > b1.max.x || b2.min.z < b1.min.z);
+  ok('todo robô cabe na caixa do prédio', [...s.agents.values()].every(
+    (a) => a.wx >= b2.min.x - 2 && a.wx <= b2.max.x + 2 && a.wy >= b2.min.y - 1 && a.wy <= b2.max.y + 1));
+  { const v = invariantsHold(s); ok('invariantes valem no prédio de dois andares', v.ok, v.detail); }
 }
 
-// ── o poço do elevador e a viagem em três pernas ───────────────────────────
+// ── a escada: um lance por vão, subindo degrau a degrau (issue #16) ─────────
 {
   const s = createScene();
   apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
 
-  // O poço é uma coluna própria: nenhum cômodo invade a faixa dele.
-  // O poço fica atrás das plataformas (wy negativo): nenhum cômodo o alcança.
-  ok('o poço fica atrás dos cômodos', SHAFT.wy + SHAFT.d <= 0);
-  ok('o poço está na faixa da plataforma', SHAFT.wx >= 0 && SHAFT.wx + SHAFT.w <= PLATE.x);
-  const sh = shaftRect(s);
-  ok('o poço vai do último andar até o térreo', sh.y <= roomRect(0).y && sh.y + sh.h >= cabinRect(GROUND_FLOOR).y);
-  ok('a cabine cabe dentro do poço', cabinRect(0).x >= sh.x && cabinRect(0).x + cabinRect(0).w <= sh.x + sh.w);
-  ok('a cabine do térreo fica abaixo da do 1º andar', cabinRect(GROUND_FLOOR).y > cabinRect(0).y);
-  ok('a cabine subiu para receber quem chegou', s.cabinFloor === 0);
+  // O lance liga o pé, num andar, ao topo, no de cima — vencendo altura e
+  // deslocamento diagonal ao mesmo tempo.
+  const foot = stairFoot(0);
+  const head = stairHead(0);
+  ok('o pé do lance está no andar de baixo', foot.wy === levelY(0));
+  ok('o topo do lance está no andar de cima', head.wy === levelY(1));
+  ok('o lance vence o deslocamento diagonal', Math.abs(head.wx - foot.wx) > 0 || Math.abs(head.wz - foot.wz) > 0);
 
-  // Usar uma estação vira uma viagem: entrar na cabine, descer, sair.
+  const steps = stairSteps(0);
+  ok('o lance tem os degraus declarados', steps.length === STEPS);
+  ok('cada degrau sobe em relação ao anterior', steps.every((st, i) => i === 0 ? st.wy > foot.wy : st.wy > steps[i - 1].wy));
+  ok('o último degrau chega ao andar de cima', Math.abs(steps[steps.length - 1].wy - levelY(1)) < 1e-9);
+  ok('o degrau final já pertence ao andar de cima', steps[steps.length - 1].floor === 1);
+
+  // Usar uma estação é descer a escada: anda, desce, anda.
   const c = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }));
   const kinds = cmdsOf(c, 'agent-move').map((m) => m.kind);
-  ok('a ida passa por embarque, viagem e desembarque',
-     kinds.includes('board') && kinds.includes('ride') && kinds.includes('off'), kinds.join(','));
-  ok('anda até a porta do elevador antes de embarcar', kinds[0] === 'walk', kinds.join(','));
-  const board = cmdsOf(c, 'agent-move').find((m) => m.kind === 'board');
-  ok('o embarque para dentro da cabine do próprio andar',
-     Math.abs(board.x - cabinStand(0).x) < 1 && Math.abs(board.y - cabinStand(0).y) < 1);
-  ok('sai da cabine e ainda caminha até a estação',
-     kinds.lastIndexOf('walk') > kinds.indexOf('off'), kinds.join(','));
-  ok('a cabine é chamada na viagem', cmdsOf(c, 'cabin').length === 1);
-  ok('a cabine desce ao térreo', s.cabinFloor === -1 && cmdsOf(c, 'cabin')[0].to === -1);
-  ok('o robô termina na estação', Math.abs(s.agents.get('a1').x - STATIONS.terminal.x) < 60);
-  { const v = invariantsHold(s); ok('invariantes valem depois da descida', v.ok, v.detail); }
+  ok('anda até a escada antes de descer', kinds[0] === 'walk', kinds.join(','));
+  ok('a descida é feita por degraus', kinds.filter((k) => k === 'stair').length === STEPS, kinds.join(','));
+  ok('depois da escada ainda caminha até a estação', kinds.lastIndexOf('walk') > kinds.lastIndexOf('stair'));
+  ok('não existe mais elevador na cena', cmdsOf(c, 'cabin').length === 0);
 
-  // E a volta sobe de novo, pelas mesmas três pernas.
+  const a = s.agents.get('a1');
+  ok('o robô desce ao térreo', a.floor === GROUND_FLOOR && onGround(a));
+  ok('o robô encosta na estação', Math.abs(a.wx - STATIONS.terminal.wx) < 2 && Math.abs(a.wz - STATIONS.terminal.wz) < 2.5);
+  ok('usar estação marca o robô como fora', a.away === true);
+  { const v = invariantsHold(s); ok('invariantes valem com o robô na estação', v.ok, v.detail); }
+
+  // E a volta sobe pela escada, terminando no próprio cômodo.
   const back = apply(s, evt({ kind: 'tool_end', agentId: 'a1', agentType: 'Explore', tool: 'Bash' }));
   const volta = cmdsOf(back, 'agent-move').map((m) => m.kind);
-  ok('a volta também embarca, viaja e desembarca',
-     volta.includes('board') && volta.includes('ride') && volta.includes('off'), volta.join(','));
-  ok('a cabine sobe ao andar do robô', s.cabinFloor === 0);
-  ok('o robô volta ao próprio cômodo', insideRoom(s.agents.get('a1').x, s.agents.get('a1').y, s.agents.get('a1').room));
+  ok('a volta também sobe por degraus', volta.filter((k) => k === 'stair').length === STEPS, volta.join(','));
+  const a2 = s.agents.get('a1');
+  ok('ao terminar, o robô deixa de estar fora', a2.away === false);
+  ok('o robô volta para o próprio cômodo', insideRoom(a2, a2.room) && a2.floor === 0);
+}
+
+// ── dois robôs na mesma estação não se sobrepõem ───────────────────────────
+{
+  const s = createScene();
+  const term = { kind: 'terminal', key: 'terminal', label: 'terminal' };
+  apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: term }));
+  apply(s, evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'Bash', prop: term }));
+  const a1 = s.agents.get('a1');
+  const a2 = s.agents.get('a2');
+  ok('os dois na estação, no térreo', a1.away && a2.away && onGround(a1) && onGround(a2));
+  ok('os dois não se sobrepõem na estação', Math.hypot(a1.wx - a2.wx, a1.wz - a2.wz) > 0.9);
+  { const v = invariantsHold(s); ok('invariantes valem com dois na estação', v.ok, v.detail); }
 }
 
 // ── o renderizador ao menos analisa ───────────────────────────────────────

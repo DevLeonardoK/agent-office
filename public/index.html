@@ -338,250 +338,79 @@ select:focus-visible, input:focus-visible {
     radial-gradient(120% 90% at 50% 0%, #0c1622 0%, var(--ink) 72%);
 }
 
-#plan {
-  position: relative;
-  width: 1160px;
-  height: 900px;
-  flex: none;
-  transform-origin: center;
+#scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
-/* A caixa do #plan é o 1º andar mais o térreo; a planta desenhada sobe acima
-   dela conforme o prédio cresce, então top/height vêm do JS. */
-#blueprint { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
-
-#props, #agents, #doors { position: absolute; inset: 0; }
-.prop { z-index: 500; }
-
-
-
-/* ── plaquetas da porta (o agent_type do ocupante do cômodo) ─────────────── */
-
-.door-plate {
+/* Rótulos: DOM sobre a cena 3D, reposicionados por quadro a partir do ponto de
+   mundo. Texto continua sendo texto — nítido em qualquer zoom. */
+#overlay {
   position: absolute;
-  transform: translate(-50%, -50%);
-  max-width: 168px;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.tag3d {
+  position: absolute;
+  top: 0; left: 0;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.tag3d.station {
+  padding: 2px 6px;
+  color: var(--faint);
+  font: 500 var(--t-micro)/1.2 var(--mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+.tag3d.prop {
+  padding: 2px 6px;
+  background: color-mix(in srgb, var(--ink) 80%, transparent);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  color: var(--text-2);
+  font: 400 var(--t-micro)/1.2 var(--mono);
+}
+
+.tag3d.plate {
   padding: 3px 8px;
   background: var(--ink);
   border: 1px solid hsl(var(--h) 45% 46%);
   border-radius: 2px;
-  font: 500 var(--t-micro)/1.2 var(--mono);
-  letter-spacing: .12em;
-  text-transform: uppercase;
   color: hsl(var(--h) 55% 74%);
-  white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis;
-  pointer-events: none;
-}
-
-.door-plate[data-main] { border-color: #c9c0a8; color: #e4dcc6; }
-.door-plate[data-leaving] { opacity: .4; }
-.door-plate[data-away] { border-style: dashed; opacity: .7; }
-
-/* marca "ocupado, fora": o dono desceu ao térreo usar uma estação (issue #9) */
-.room-mark {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  padding: 2px 7px;
-  border: 1px dashed hsl(var(--h) 45% 50%);
-  border-radius: 2px;
   font: 500 var(--t-micro)/1.2 var(--mono);
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  color: hsl(var(--h) 50% 66%);
-  opacity: .62;
-  white-space: nowrap;
-  pointer-events: none;
-}
-.room-mark[data-main] { border-color: #b5ad98; color: #cfc7b2; }
-
-/* ── móveis, como símbolo de planta ─────────────────────────────────── */
-
-.prop {
-  position: absolute;
-  top: 0; left: 0;
-  width: 104px;
-  margin: -34px 0 0 -52px;   /* ancora no centro do símbolo */
-  text-align: center;
-  will-change: transform, opacity;
-}
-
-.prop svg { display: block; margin: 0 auto; overflow: visible; transform: scale(.72); }
-.prop .sym { stroke: var(--draft); fill: none; stroke-width: 1.4; transition: stroke .5s, filter .5s; }
-.prop .sym-fill { fill: rgb(77 127 168 / .07); stroke: none; transition: fill .5s; }
-
-.prop-label {
-  display: block;
-  margin-top: 5px;
-  font: 400 var(--t-micro)/1.25 var(--mono);
-  letter-spacing: .05em;
-  color: var(--faint);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  transition: color .5s;
-}
-
-.prop.hit .sym { stroke: #9ec9e8; filter: drop-shadow(0 0 6px rgb(120 190 235 / .55)); }
-.prop.hit .sym-fill { fill: rgb(120 190 235 / .13); }
-.prop.hit .prop-label { color: var(--text-2); }
-
-/* ── agentes ────────────────────────────────────────────────────────── */
-
-.agent {
-  position: absolute;
-  top: 0; left: 0;
-  width: 0; height: 0;
-  will-change: transform;
-}
-
-.agent .figure { position: absolute; left: -29px; top: -64px; width: 58px; height: 71px; }
-.agent .figure svg { display: block; overflow: visible; }
-
-.agent .flip { transform-origin: 23px 50px; transition: transform .18s ease; }
-.agent .figure svg { width: 58px; height: 71px; }
-.agent[data-face="-1"] .flip { transform: scaleX(-1); }
-
-/* a carcaça é o matiz: metal pintado, com a face de trás mais escura */
-.agent .chassis       { fill: hsl(var(--h) 62% 52%); stroke: hsl(var(--h) 55% 32%); stroke-width: 1.2; }
-.agent .chassis-shade { fill: hsl(var(--h) 55% 30%); }
-.agent .panel         { stroke: hsl(var(--h) 45% 26%); stroke-width: .9; fill: none; }
-.agent .vent          { stroke: hsl(var(--h) 45% 30%); stroke-width: 1; opacity: .8; }
-.agent .screws circle { fill: hsl(var(--h) 40% 26%); }
-.agent .handle        { stroke: hsl(var(--h) 55% 40%); stroke-width: 2.4; fill: none; stroke-linecap: round; }
-
-/* plaqueta gravada na carcaça, como o SUBAGENT 01 das fotos de referência */
-.agent .badge      { fill: hsl(var(--h) 30% 26%); stroke: hsl(var(--h) 40% 36%); stroke-width: .7; }
-.agent .badge-etch { stroke: hsl(var(--h) 60% 72%); stroke-width: 1.2; stroke-linecap: round; }
-
-/* esteiras: correia escura, dentes e as quatro roldanas */
-.agent .belt        { fill: hsl(215 18% 13%); stroke: hsl(215 14% 26%); stroke-width: 1; }
-.agent .tread-teeth { stroke: hsl(215 12% 30%); stroke-width: 1.1; opacity: .8; }
-.agent .roller      { fill: hsl(215 14% 22%); stroke: hsl(215 12% 34%); stroke-width: .9; }
-.agent .axle        { stroke: hsl(var(--h) 45% 34%); stroke-width: 3; stroke-linecap: round; }
-.agent .drop        { fill: #000; opacity: .42; }
-
-/* a tela-rosto domina a face: vidro fundo, moldura, e o brilho do matiz */
-.agent .bezel  { fill: hsl(var(--h) 50% 24%); stroke: hsl(var(--h) 45% 20%); stroke-width: 1; }
-.agent .screen { fill: #060c14; stroke: hsl(var(--h) 40% 18%); stroke-width: 1; }
-
-.agent .eye    { fill: hsl(var(--h) 92% 76%); }
-.agent .mouth  { stroke: hsl(var(--h) 92% 76%); stroke-width: 1.8; stroke-linecap: round; fill: none; }
-.agent .eye-line, .agent .eye-x { stroke: hsl(var(--h) 92% 76%); stroke-width: 2.1; stroke-linecap: round; fill: none; }
-.agent .eye-x  { stroke: #ff6b6b; }
-
-/* três estados de rosto; só um aparece por vez */
-.agent .m { display: none; }
-.agent[data-mood="idle"]  .m-idle  { display: block; }
-.agent[data-mood="work"]  .m-work  { display: block; }
-.agent[data-mood="error"] .m-error { display: block; }
-
-/* olhar na direção do móvel: trabalhando, os olhos deslizam para a frente.
-   Não é animação cíclica — assenta num estado fixo, íntegro no print. */
-.agent .face { transition: transform .2s ease; }
-.agent.working .face { transform: translateX(1.6px); }
-
-/* a tela acesa é o único brilho do robô, e só enquanto ele trabalha */
-.agent.working .screen { fill: hsl(var(--h) 45% 12%); }
-
-/* o principal carrega o arco-íris na carcaça, não uma matiz */
-.agent[data-main] .chassis { fill: url(#agentRainbow); stroke: hsl(0 0% 100% / .35); }
-.agent[data-main] .chassis-shade { fill: #000; opacity: .16; }
-.agent[data-main] .eye     { fill: #fff; }
-.agent[data-main] .mouth   { stroke: #fff; }
-.agent[data-main] .eye-line { stroke: #fff; }
-.agent[data-main] .badge-etch { stroke: #fff; }
-
-/* plaqueta de identificação, na carcaça: o agent_type, legível de longe */
-.agent .plate {
-  position: absolute;
-  left: 4px; top: 73px; width: 50px; height: 11px;
-  display: flex; align-items: center; justify-content: center;
-  background: #0a1420;
-  border: 1px solid hsl(var(--h) 45% 42%);
-  border-radius: 2px;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.agent .plate-type {
-  max-width: 100%;
-  font: 600 6.5px/1 var(--mono);
-  letter-spacing: .02em;
-  text-transform: uppercase;
-  color: hsl(var(--h) 65% 80%);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-.agent[data-main] .plate { border-color: hsl(0 0% 100% / .5); }
-.agent[data-main] .plate-type {
-  background: var(--rainbow);
-  -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-
-.agent-name {
-  position: absolute;
-  left: -60px; top: 30px;
-  width: 120px;
-  text-align: center;
-  font: 500 var(--t-micro)/1.2 var(--mono);
-  letter-spacing: .09em;
-  text-transform: uppercase;
-  pointer-events: none;
-}
-
-.agent-tool {
-  display: block;
-  font-size: 8.5px;
   letter-spacing: .12em;
-  color: var(--faint);
-  min-height: 10px;
+  text-transform: uppercase;
+  max-width: 168px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-
-/* Nenhuma animação cíclica no robô: esteira é desenho, não movimento. A única
-   motricidade é o deslocamento x/y, que passa pela motion.dev — nada que
-   congele torto no print. */
-
-/* dentro da cabine o robô não "caminha": ele é levado */
-.agent.riding .flip { transform: none; }
-
-/* ── fala ───────────────────────────────────────────────────────────── */
-
-.bubble {
-  position: absolute;
-  bottom: calc(62px + var(--lift, 0px));
-  left: 50%;
-  width: max-content;
-  max-width: 236px;
-  padding: 7px 10px 8px;
-  transform: translateX(-50%);
-  background: #0a1420;
-  border: 1px solid hsl(var(--h) 45% 38%);
-  border-left-width: 2px;
-  font: 400 var(--t-note)/1.5 var(--mono);
+.tag3d.plate[data-main] {
+  border-image: linear-gradient(90deg, hsl(0 80% 62%), hsl(52 85% 58%), hsl(145 60% 52%), hsl(210 70% 58%), hsl(280 60% 64%)) 1;
   color: var(--text);
-  text-align: left;
-  z-index: 20;
-  pointer-events: none;
-  box-shadow: 0 10px 26px rgb(0 0 0 / .6);
 }
+.tag3d.plate[data-away] { opacity: .55; border-style: dashed; }
 
-.bubble[data-anchor="left"] { left: -14px; transform: none; }
-.bubble[data-anchor="left"]::after { left: 22px; }
-
-.bubble::after {
-  content: "";
-  position: absolute;
-  left: 14px; bottom: -5px;
-  width: 8px; height: 8px;
-  background: #0a1420;
-  border-right: 1px solid hsl(var(--h) 45% 38%);
-  border-bottom: 1px solid hsl(var(--h) 45% 38%);
-  transform: rotate(45deg);
+.tag3d.bubble {
+  max-width: 260px;
+  padding: 7px 10px;
+  background: var(--plate);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  color: var(--text);
+  font: 400 var(--t-body)/1.4 var(--sans);
+  white-space: normal;
+  box-shadow: 0 8px 24px rgb(0 0 0 / .45);
 }
-
-.bubble[data-tone="order"]  { border-color: var(--draft); }
-.bubble[data-tone="order"]::after { border-color: var(--draft); }
-.bubble[data-tone="result"] { border-color: hsl(var(--h) 50% 46%); }
-.bubble[data-tone="brief"]  { color: var(--text-2); }
+.tag3d.bubble[data-tone="order"] { border-color: hsl(210 60% 50% / .6); }
+.tag3d.bubble[data-tone="result"] { border-color: hsl(150 45% 45% / .6); }
 
 /* ── vazio ──────────────────────────────────────────────────────────── */
 
@@ -663,12 +492,8 @@ select:focus-visible, input:focus-visible {
   </aside>
 
   <main id="stage">
-    <div id="plan">
-      <svg id="blueprint" viewBox="0 0 1160 900" aria-hidden="true"></svg>
-      <div id="doors"></div>
-      <div id="props"></div>
-      <div id="agents"></div>
-    </div>
+    <canvas id="scene"></canvas>
+    <div id="overlay" aria-live="off"></div>
 
 
     <div id="empty">

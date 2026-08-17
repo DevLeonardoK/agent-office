@@ -27,35 +27,30 @@ O lugar de exatamente um agente dentro de um andar, com os móveis que esse
 agente usou. Cinco por andar. É esvaziado quando muda de ocupante.
 _Avoid_: sala, baia, estação (é outra coisa), escritório
 
-**Corte vertical**:
-A vista padrão do prédio: os andares empilhados na tela, o prédio inteiro
-visível de uma vez. Cresce e encolhe com o prédio.
-_Avoid_: vista geral, zoom out, mapa
-
-**Andar cheio**:
-A vista de um andar só, enquadrado na tela inteira, com o resto do prédio sob
-um véu. Aberta ao clicar num andar; `esc` volta ao corte vertical.
-_Avoid_: tela cheia (é do navegador), foco, modal
+**Vista empilhada**:
+A única vista: o prédio inteiro enquadrado, com os andares escalonados em
+diagonal. Cresce e encolhe com o prédio.
+_Avoid_: corte vertical (era a versão 2D), zoom out, mapa
 
 **Plataforma**:
-O piso de um andar, desenhado como losango ladrilhado. O que se empilha para
-formar o prédio.
+O piso de um andar, com planta pentagonal e ladrilhado. O que se escalona em
+diagonal para formar o prédio.
 _Avoid_: laje (é a espessura), tabuleiro, grid
 
 **Ladrilho**:
-A unidade do mundo isométrico. Posição de agente e de móvel se pensa em
-ladrilhos; pixel é coisa do renderizador.
+A unidade do mundo 3D. Posição de agente e de móvel se pensa em ladrilhos;
+pixel é coisa do renderizador.
 _Avoid_: célula, tile, quadrado
 
-**Poço**:
-A coluna do elevador, à direita da planta, atravessando todos os andares até o
-térreo. Não é cômodo e não conta agente.
-_Avoid_: elevador (é a cabine mais o poço), duto, shaft
+**Escada**:
+O lance que liga um andar ao de cima, na baia à direita dos cômodos. Vence a
+altura e o deslocamento diagonal entre as duas plataformas.
+_Avoid_: elevador (não existe mais), rampa, acesso
 
-**Cabine**:
-A caixa que sobe e desce dentro do poço, levando um robô entre o cômodo dele e
-o térreo. Uma por prédio.
-_Avoid_: elevador, carro, plataforma
+**Degrau**:
+A unidade da escada. O robô sobe um por vez, e é por isso que a subida pode ser
+animada.
+_Avoid_: passo, step
 
 ## Quem trabalha
 

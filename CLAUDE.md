@@ -1,11 +1,11 @@
 # Escritório dos Agentes
 
-Visualiza a atividade do Claude Code como uma planta baixa: hooks → servidor →
-navegador. Node puro, sem `npm install` — `motion.dev` está vendorizada em
-`public/vendor/motion.js` como bundle fechado.
+Visualiza a atividade do Claude Code como um escritório 3D: hooks → servidor →
+navegador. Node puro, sem `npm install` — `three.js` e `motion.dev` estão
+vendorizadas em `public/vendor/` como bundles fechados.
 
 ```
-node selftest.mjs        # 153 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 183 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -22,10 +22,9 @@ exercitar todo o posicionamento em Node — mudança de posicionamento entra em
 
 Quatro coisas quebraram este projeto de formas silenciosas. Todas voltam.
 
-**A motion.dev é dona do `transform`.** Ela compõe o transform a partir de
-`x`/`y`/`scale` via WAAPI, sem escrever no atributo `style`. Um
-`node.style.transform` escrito na mão funciona até a primeira animação e depois
-some. Posição passa por `animate(node, {x, y}, {duration: 0})`.
+**A motion.dev saiu do renderizador.** Com a cena em 3D não existe `transform`
+de CSS para ela compor: o laço do `three` é o dono do movimento (ADR-0003). Ela
+segue vendorizada, para a interface 2D.
 
 **O servidor responde 204 com corpo vazio em `POST /hook`.** Qualquer outra
 coisa vira aviso de erro no transcript do usuário, a cada ferramenta usada.
@@ -48,10 +47,15 @@ parece bug de layout e não é:
 ```
 chrome --headless=new --screenshot=shot.png --window-size=1500,860 \
   --virtual-time-budget=12000 "http://127.0.0.1:4517/?demo&instant&upto=21"
+
+# a cena 3D precisa de GPU; no headless, use o renderizador de software:
+#   --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader
 ```
 
-O orçamento de 12 s não é folga: com o ritmo lento e a viagem em três pernas, um
-print de 3 s pega os robôs no meio do caminho e parece bug de posicionamento.
+O orçamento não é folga: com o ritmo lento e a subida degrau a degrau, um print
+curto pega os robôs no meio do caminho e parece bug de posicionamento. No modo
+demo, `document.documentElement.dataset.ready` vira `true` quando o roteiro
+acaba — é o sinal de que a cena pode ser fotografada.
 
 O `upto=21` para o roteiro com seis agentes vivos — é onde o 2º andar existe. O
 print não clica, então a vista de andar cheio se pede pela URL: `&floor=1` abre
@@ -62,9 +66,9 @@ Antes de perseguir uma deformação vista em print, meça a geometria real com
 
 ## A vista
 
-Uma só: o prédio empilhado, enquadrado por `buildingRect(scene)`. Havia também
-uma vista de andar cheio; ela foi removida — no prédio isométrico, duas
-leituras do mesmo espaço confundiam mais do que ajudavam.
+Uma só: o prédio inteiro, enquadrado a partir de `buildingBounds(scene)`. Havia
+também uma vista de andar cheio; ela foi removida — duas leituras do mesmo
+espaço confundiam mais do que ajudavam.
 
 ## Mobília fixa (issue #14)
 
@@ -95,29 +99,27 @@ Três lugares, nesta ordem:
 3. `public/office.js` → `SYMBOL`, o desenho em símbolo de planta, e `VERB`, o
    verbo em português que aparece no registro.
 
-## O mundo isométrico
+## O mundo 3D
 
-A referência é `media-agents/escriotorio1.png`: plataformas em losango
-empilhadas, piso ladrilhado, duas paredes por andar. O `scene.mjs` raciocina em
-**coordenadas de mundo** — `(wx, wy)` em ladrilhos sobre a plataforma, mais o
-andar — e projeta com `iso()`. Todo comando sai já em pixel, então o
-renderizador continua sem geometria própria.
+A cena é `three.js` (ADR-0003). O `scene.mjs` raciocina em **coordenadas de
+mundo** — `wx` para o lado, `wy` para a altura, `wz` para a profundidade — e é
+ele quem resolve toda a geometria; o renderizador recebe pontos prontos e não
+calcula posição nenhuma. É isso que mantém o `selftest.mjs` capaz de exercitar o
+posicionamento inteiro em Node.
 
-Consequências que já morderam:
-
-- **Cômodo é losango, não retângulo.** `roomRect` existe só para enquadramento;
-  quem testa contenção usa `roomQuad` com ponto-dentro-de-polígono.
-- **Deslocar não é mudar de cômodo.** Na realocação, os móveis recebem vaga
-  nova via `propSlot`; somar um `dy` — o que funcionava na elevação — põe o
-  móvel no vizinho.
-- **Ordem de desenho é profundidade.** O `z-index` do robô sai do y de tela;
-  sem isso, quem está no fundo aparece por cima da parede da frente.
-
-O **poço do elevador** fica atrás das plataformas (`SHAFT.wy` negativo) e é
-desenhado antes delas; a cabine, depois de tudo, para ser vista. A viagem até
-uma estação sai em três pernas (`leg: board | ride | off`), encadeadas por
-promessa no renderizador: sem o encadeamento a motion troca o destino no meio e
-o robô corta caminho pelo ar.
+- **Andares escalonados em diagonal** (`platformOrigin`): cada plataforma nasce
+  deslocada da de baixo, para nenhuma tapar a outra.
+- **Plataforma pentagonal** (`platformShape`): o retângulo com o canto do fundo
+  chanfrado — é o chanfro que abre lugar para a escada.
+- **Escada, não elevador** (`stairFoot`, `stairHead`, `stairSteps`): a viagem
+  entre andares é uma sequência de degraus, um comando `agent-move` por degrau.
+- **Texto é DOM**, numa camada sobre o canvas, reposicionado por quadro a partir
+  do ponto de mundo. Textura de texto perde nitidez no zoom.
+- **Enquadramento**: mede a caixa do grafo desenhado e mira a faixa livre entre
+  os trilhos. Os painéis flutuam sobre o palco, então a largura do canvas não é
+  a largura útil — foi assim que o prédio ficou desenhado atrás do registro.
+- **Pé-direito baixo (1,9) e câmera alta.** Parede alta com câmera baixa projeta
+  sobre o piso do próprio andar e o cômodo vira uma faixa preta.
 
 ## Trajeto e ritmo
 
