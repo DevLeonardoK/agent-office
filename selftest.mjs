@@ -12,7 +12,8 @@ import {
   createScene, apply, rebuild, roomTiles, roomQuad, ROOMS_PER_FLOOR,
   DOOR, STATIONS, MAIN_ROOM, floorCount, buildingBounds, platformShape, platformOrigin,
   plateOf, world, levelY, stairSteps, stairFoot, stairHead, STEPS, LEVEL, STAGGER,
-  PLATE, GROUND_FLOOR, GROUND_PLATE, WALL_H, STAIR_LANES, stairLaneOffset,
+  PLATE, GROUND_FLOOR, GROUND_PLATE, WALL_H, STAIR_LANES, stairLaneOffset, stairWell, WELL_W,
+  HUE_COUNT,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { appendEvent, logPathFor } from './logstore.mjs';
@@ -873,6 +874,82 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
     return Math.hypot(a.x - b.x, a.z - b.z) > 0.8;
   })());
   { const v = invariantsHold(s); ok('invariantes valem com dois na escada', v.ok, v.detail); }
+}
+
+// ── o vão da escada: o robô não sobe contra a laje (issue #19) ──────────────
+{
+  const inside = (poly, x, z) => {
+    let hit = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[i], b = poly[j];
+      if ((a.wz > z) !== (b.wz > z) && x < ((b.wx - a.wx) * (z - a.wz)) / (b.wz - a.wz) + a.wx) hit = !hit;
+    }
+    return hit;
+  };
+
+  const well = stairWell(0);
+  ok('o vão é um retângulo de quatro cantos', well.length === 4);
+  ok('o vão está na altura da laje do andar', well.every((p) => p.wy === levelY(0)));
+  ok('o vão tem a largura declarada', Math.abs(Math.hypot(well[0].wx - well[1].wx, well[0].wz - well[1].wz) - WELL_W) < 1e-9);
+
+  // A boca do vão cobre o desembarque e os últimos degraus da subida: é por ali
+  // que o robô passa, e é o que precisa estar aberto.
+  const head = stairHead(-1);
+  ok('o vão cobre o desembarque', inside(well, head.wx, head.wz));
+  const steps = stairSteps(-1);
+  const altos = steps.filter((st) => st.wy > levelY(0) - 1.6);
+  ok('o vão cobre os últimos degraus', altos.length > 0 && altos.every((st) => inside(well, st.wx, st.wz)),
+     `${altos.filter((st) => !inside(well, st.wx, st.wz)).length} degraus tapados`);
+
+  // E não é um buraco no meio do cômodo: fica na baia, fora dos cinco cômodos.
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
+    const r = roomTiles(i);
+    const o = platformOrigin(0);
+    const cx = o.x + r.lx + r.w / 2;
+    const cz = o.z + r.lz + r.d / 2;
+    ok(`o vão não invade o cômodo ${i}`, !inside(well, cx, cz));
+  }
+}
+
+// ── a porta pisa na plataforma do térreo ───────────────────────────────────
+{
+  // Fora da plataforma, quem saía do prédio caminhava para o vazio — e o que se
+  // via era um robô flutuando ao lado do prédio, como se houvesse escada ali.
+  const o = platformOrigin(GROUND_FLOOR);
+  ok('a porta está dentro da plataforma do térreo',
+     DOOR.wx > o.x && DOOR.wx < o.x + GROUND_PLATE.x &&
+     DOOR.wz > o.z && DOOR.wz < o.z + GROUND_PLATE.z,
+     `porta=(${DOOR.wx.toFixed(1)},${DOOR.wz.toFixed(1)}) plataforma x=[${o.x},${(o.x + GROUND_PLATE.x)}] z=[${o.z},${(o.z + GROUND_PLATE.z)}]`);
+  ok('a porta está na altura do térreo', DOOR.wy === levelY(GROUND_FLOOR));
+
+  // E o trajeto de saída termina lá, pisando no chão.
+  const s = createScene();
+  apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
+  const c = apply(s, evt({ kind: 'stop', agentId: 'a1', agentType: 'Explore', text: 'tchau' }));
+  const last = cmdsOf(c, 'agent-move').at(-1);
+  ok('quem sai termina na porta, sobre a plataforma', onGround(last, 0));
+}
+
+// ── a paleta dos subagentes, com o rosa (issue #17) ────────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
+  ok('o principal não tira matiz da paleta', s.agents.get('main').hueIndex === -1);
+
+  // Seis subagentes seguidos recebem os seis matizes, sem repetir.
+  const vistos = new Set();
+  for (let i = 0; i < HUE_COUNT; i++) {
+    apply(s, evt({ kind: 'spawn', agentId: 'p' + i, agentType: 'Explore' }));
+    vistos.add(s.agents.get('p' + i).hueIndex);
+  }
+  ok('a paleta tem seis matizes', HUE_COUNT === 6);
+  ok('seis subagentes seguidos não repetem matiz', vistos.size === HUE_COUNT, [...vistos].join(','));
+  ok('o índice de matiz fica dentro da paleta', [...vistos].every((i) => i >= 0 && i < HUE_COUNT));
+
+  // O sétimo dá a volta na paleta — e não estoura o índice.
+  apply(s, evt({ kind: 'spawn', agentId: 'p6', agentType: 'Explore' }));
+  const setimo = s.agents.get('p6').hueIndex;
+  ok('o sétimo recomeça a paleta', setimo >= 0 && setimo < HUE_COUNT);
 }
 
 // ── o renderizador ao menos analisa ───────────────────────────────────────

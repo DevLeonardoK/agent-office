@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `three.js` e `motion.dev` estão
 vendorizadas em `public/vendor/` como bundles fechados.
 
 ```
-node selftest.mjs        # 199 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 217 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -136,6 +136,20 @@ posicionamento inteiro em Node.
   cada mudança do prédio; depois de girar, o ângulo é do usuário. Para print,
   `?view=azim,elev,zoom` fixa a órbita — o headless não arrasta o mouse.
 
+**A paleta tem seis matizes e o número mora no `scene.mjs`** (`HUE_COUNT`). Era um
+`% 5` casado por acidente com os cinco cômodos por andar; com o rosa (issue #17)
+são seis, e um andar cheio pode repetir cor — preço aceito para o rosa existir e
+não se confundir com o violeta.
+
+**`?probe` conta robô no ar.** A sonda soma os quadros em que um robô muda de
+altura fora de uma perna de escada e publica em `document.documentElement.dataset.air`
+(`quadros|maior salto`). Serve para provar com número, e não com print, que
+ninguém sobe pelo vazio — no roteiro do demo o valor tem de ser `0|0.000`.
+
+**A porta pisa na plataforma do térreo.** Fora dela, quem saía do prédio caminhava
+para o vazio e parecia flutuar numa escada imaginária ao lado do prédio. Há
+asserção de que a porta está dentro da plataforma.
+
 **Todo subagente entra pela porta do prédio.** Nasce no térreo e sobe a escada
 até o cômodo dele — inclusive o filho convocado por outro agente. A issue #10
 tinha feito o filho nascer ao lado do pai; num prédio de vários andares isso o
@@ -172,7 +186,8 @@ estavam, não onde estão.
 *Desenho frio, gente quente.* O prédio inteiro é azul de prancheta
 dessaturado; os agentes são a única coisa saturada da tela. Os agentes são
 robôs de esteira com carcaça colorida — a carcaça *é* o matiz. Os subagents
-recebem os cinco matizes da paleta; o principal recebe um gradiente arco-íris,
+recebem os **seis** matizes da paleta (âmbar, vermelho, verde, violeta, magenta e
+rosa); o principal recebe um gradiente arco-íris,
 e esse gradiente tem que aparecer igual no robô, no elenco e no registro. (A
 invariante do creme foi revogada — veja `docs/adr/0002`.)
 

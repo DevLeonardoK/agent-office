@@ -66,9 +66,10 @@ export function platformShape(floor) {
   ];
 }
 
-// Entrada do prédio, na quina do térreo: quem chega de fora nasce aqui, e quem
-// sai do prédio caminha até aqui.
-export const DOOR = world(-1.6, GROUND_PLATE.z - 2, GROUND_FLOOR);
+// Entrada do prédio, na quina do térreo: quem chega de fora nasce aqui, e quem sai
+// caminha até aqui. Tem de ficar **sobre** a plataforma: fora dela, quem saía do
+// prédio caminhava para o vazio e parecia flutuar numa escada imaginária.
+export const DOOR = world(0.9, GROUND_PLATE.z - 1.2, GROUND_FLOOR);
 
 // As quatro estações canônicas (CONTEXT.md): recurso singular no prédio inteiro,
 // sempre no térreo. A chave delas é global — há uma só de cada.
@@ -83,6 +84,12 @@ export const STATIONS = {
 // Cinco cômodos por andar, lado a lado ao longo de wx.
 export const ROOMS_PER_FLOOR = 5;
 const ROOM_W = PLATE.x / ROOMS_PER_FLOOR;
+
+// Quantos matizes a paleta tem. Vive aqui, e não só no renderizador, porque é o
+// `scene.mjs` que distribui o matiz entre os subagentes — o número precisava
+// deixar de ser um `% 5` casado por acidente com os cinco cômodos por andar
+// (issue #17).
+export const HUE_COUNT = 6;
 
 // Cômodo reservado ao agente principal: sempre no andar 0, nunca reciclado.
 export const MAIN_ROOM = 0;
@@ -199,6 +206,45 @@ export function stairSteps(floor, lane = 0) {
     });
   }
   return out;
+}
+
+/**
+ * O vão da escada num andar: o buraco que a laje precisa ter para o lance que
+ * chega do andar de baixo passar. Sem ele o robô sobe direto contra a laje — bate
+ * a cabeça e atravessa o piso.
+ *
+ * Devolve o retângulo, em pontos de mundo, alinhado à direção do lance: da boca
+ * do vão (onde o lance encontra a laje) até o desembarque.
+ */
+export const WELL_W = 3.6;     // largura do vão: um pouco mais que a escada
+export const WELL_LEN = 5.4;   // quanto ele avança sobre a laje, ao longo do lance
+export const WELL_LIP = 0.9;   // folga além do desembarque, para o último degrau caber
+
+export function stairWell(floor) {
+  const flight = floor - 1;                 // o lance que chega neste andar
+  const a = stairFoot(flight);
+  const b = stairHead(flight);
+  const dx = b.wx - a.wx;
+  const dz = b.wz - a.wz;
+  const len = Math.hypot(dx, dz) || 1;
+  const ux = dx / len;
+  const uz = dz / len;                       // direção da subida, no plano
+  const px = -uz;
+  const pz = ux;                             // perpendicular
+  const y = levelY(floor);
+
+  // Do desembarque para trás, ao longo do lance: é esse trecho que fica aberto. A
+  // boca avança um pouco além do desembarque, senão o último degrau cai exatamente
+  // na borda do vão e continua tapado pela laje.
+  const front = { x: b.wx + ux * WELL_LIP, z: b.wz + uz * WELL_LIP };
+  const back = { x: b.wx - ux * WELL_LEN, z: b.wz - uz * WELL_LEN };
+  const half = WELL_W / 2;
+  return [
+    { wx: front.x + px * half, wy: y, wz: front.z + pz * half },
+    { wx: front.x - px * half, wy: y, wz: front.z - pz * half },
+    { wx: back.x - px * half, wy: y, wz: back.z - pz * half },
+    { wx: back.x + px * half, wy: y, wz: back.z + pz * half },
+  ];
 }
 
 /** Onde o robô fica parado no cômodo: no meio, um pouco à frente. */
@@ -337,7 +383,7 @@ function ensureAgent(scene, id, type, cmds) {
       id,
       type: type || 'claude',
       isMain,
-      hueIndex: isMain ? -1 : scene.agents.size % 5,
+      hueIndex: isMain ? -1 : scene.agents.size % HUE_COUNT,
       face: 1,
       status: 'idle',
       tool: null,

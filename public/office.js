@@ -9,7 +9,7 @@ import * as THREE from './vendor/three.js';
 import {
   createScene, apply, rebuild, floorCount, buildingBounds, platformShape, plateOf,
   roomQuad, world, platformOrigin, levelY, ROOMS_PER_FLOOR, PLATE,
-  WALL_H, GROUND_FLOOR, STATIONS, DOOR, stairSteps, stairFoot, stairHead,
+  WALL_H, GROUND_FLOOR, STATIONS, DOOR, stairSteps, stairFoot, stairHead, stairWell, HUE_COUNT,
 } from './scene.mjs';
 
 const params = new URLSearchParams(location.search);
@@ -48,11 +48,18 @@ let roomActivity = 0;
 let logged = 0;
 let drawnFloors = 0;
 
-// Cinco matizes quentes contra o azul técnico do prédio. O principal não usa
-// nenhum deles — ele carrega o arco-íris.
-const HUES = [38, 8, 165, 262, 328];
+// Os matizes dos subagentes, quentes contra o azul técnico do prédio. O principal
+// não usa nenhum deles — ele carrega o arco-íris.
+//
+// O rosa (338) entrou como sexto matiz (issue #17). O magenta 328 de antes puxava
+// para o roxo e não se distinguia do violeta; e, ao acrescentar o rosa, o magenta
+// virou o terceiro vizinho da mesma faixa — três robôs parecidos na tela. Então a
+// paleta foi reespaçada: os seis matizes ficam a pelo menos 50° um do outro.
+const HUES = [38, 8, 90, 165, 262, 338];
 const hueOf = (a) => (a.isMain ? 0 : HUES[a.hueIndex % HUES.length]);
-const hueColor = (h, l = 0.54) => new THREE.Color().setHSL(h / 360, 0.62, l);
+if (HUES.length !== HUE_COUNT) console.warn('paleta e HUE_COUNT divergem: o matiz vai repetir fora de ordem');
+// O rosa precisa de mais luz para não ler como o vermelho do rosto de erro.
+const hueColor = (h, l = 0.54) => new THREE.Color().setHSL(h / 360, 0.62, h >= 300 ? l + 0.08 : l);
 
 // ── a cena three ──────────────────────────────────────────────────────────
 
@@ -150,6 +157,13 @@ function drawPlatform(floor) {
   // A laje é o pentágono extrudado para baixo: é a espessura dela que se lê como
   // "andar" quando o prédio é olhado de lado.
   const s = new THREE.Shape(shape.map((pt) => new THREE.Vector2(pt.wx, pt.wz)));
+
+  // O vão da escada: buraco na laje por onde o lance de baixo chega. Sem ele o
+  // robô subiria contra o piso deste andar.
+  if (floor > GROUND_FLOOR) {
+    const well = stairWell(floor);
+    s.holes.push(new THREE.Path(well.map((pt) => new THREE.Vector2(pt.wx, pt.wz))));
+  }
   // A extrusão traz dois grupos de face, nesta ordem: as tampas e as laterais.
   // Invertê-los pintava o topo de escuro e a borda de claro — era isso que
   // deixava os andares de cima apagados.
@@ -425,10 +439,13 @@ function moveBot(id, wx, wy, wz, face, kind, start) {
     rec.group.position.set(wx, wy, wz);
     return;
   }
-  // Trajeto novo abandona o anterior: a fila guarda as pernas de um caminho só.
-  // Sem isto, uma sessão em rajada acumula minutos de caminhada pendente e o
-  // prédio passa a mostrar onde os agentes estavam, não onde estão.
-  if (start) rec.queue.length = 0;
+  // A fila NÃO é descartada quando chega trajeto novo. A cena calcula o caminho a
+  // partir da posição lógica do robô — que já é o fim do trajeto anterior —, então
+  // o novo caminho começa exatamente onde o antigo termina: concatenar é contínuo,
+  // e cortar era o que fazia o robô abandonar a escada no meio e atravessar o ar.
+  //
+  // O atraso que isso poderia acumular numa rajada é resolvido no laço, andando
+  // mais rápido quando a fila cresce (ver `tick`), não teleportando.
   rec.queue.push({ wx, wy, wz, kind, face });
 }
 
@@ -611,7 +628,11 @@ function tick(now) {
     if (leg) {
       const p = rec.group.position;
       p.y -= rec.bob;   // desfaz o balanço do quadro anterior antes de andar
-      const speed = leg.kind === 'stair' ? STAIR_SPEED : SPEED;
+      // Recuperação de atraso: quanto mais pernas pendentes, mais rápido o robô
+      // anda — sem nunca sair do caminho. Numa rajada de ferramentas ele corre;
+      // parado, anda no ritmo normal.
+      const rush = Math.min(3.5, 1 + rec.queue.length / 6);
+      const speed = (leg.kind === 'stair' ? STAIR_SPEED : SPEED) * rush;
       const step = speed * dt;
       const dx = leg.wx - p.x;
       const dy = leg.wy - p.y;
@@ -641,9 +662,30 @@ function tick(now) {
     }
   }
 
+  if (params.has('probe')) probeAir(now);
   placeLabels(now);
   renderer.render(three, camera);
   requestAnimationFrame(tick);
+}
+
+// Sonda de "robô no ar": conta quadros em que um robô muda de altura fora de uma
+// perna de escada. Serve para provar, com número, que ninguém sobe pelo ar.
+const airState = new Map();
+let airFrames = 0;
+let airWorst = 0;
+
+function probeAir() {
+  for (const [id, rec] of bots) {
+    const y = rec.group.position.y - rec.bob;
+    const prev = airState.get(id);
+    const kind = rec.queue[0]?.kind;
+    if (prev != null && Math.abs(y - prev) > 0.004 && kind !== 'stair') {
+      airFrames++;
+      airWorst = Math.max(airWorst, Math.abs(y - prev));
+    }
+    airState.set(id, y);
+  }
+  document.documentElement.dataset.air = `${airFrames}|${airWorst.toFixed(3)}`;
 }
 
 const v = new THREE.Vector3();
