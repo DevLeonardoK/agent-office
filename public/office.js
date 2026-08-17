@@ -9,7 +9,7 @@ import * as THREE from './vendor/three.js';
 import {
   createScene, apply, rebuild, floorCount, buildingBounds, platformShape, plateOf,
   roomQuad, world, platformOrigin, levelY, ROOMS_PER_FLOOR, PLATE,
-  WALL_H, GROUND_FLOOR, STATIONS, DOOR, stairSteps, stairFoot,
+  WALL_H, GROUND_FLOOR, STATIONS, DOOR, stairSteps, stairFoot, stairHead,
 } from './scene.mjs';
 
 const params = new URLSearchParams(location.search);
@@ -102,10 +102,13 @@ const mat = {
   floor: new THREE.MeshLambertMaterial({ color: 0x1e3a55, side: THREE.DoubleSide }),
   slab: new THREE.MeshLambertMaterial({ color: 0x0d1a27 }),
   wall: new THREE.MeshLambertMaterial({ color: 0x152943, side: THREE.DoubleSide }),
+  // A divisória é baixa e mais clara que a parede: alta e escura, ela se
+  // confundia com móvel e o cômodo virava um corredor de barras.
+  divider: new THREE.MeshLambertMaterial({ color: 0x2d4d6d }),
   line: new THREE.LineBasicMaterial({ color: 0x3d6c93, transparent: true, opacity: 0.42 }),
   edge: new THREE.LineBasicMaterial({ color: 0x5d93bc, transparent: true, opacity: 0.9 }),
   step: new THREE.MeshLambertMaterial({ color: 0x1b3048 }),
-  furniture: new THREE.MeshLambertMaterial({ color: 0x24425f }),
+  furniture: new THREE.MeshLambertMaterial({ color: 0x39628a }),
   station: new THREE.MeshLambertMaterial({ color: 0x2a4c6b }),
   screen: new THREE.MeshBasicMaterial({ color: 0x0a1520 }),
   screenLit: new THREE.MeshBasicMaterial({ color: 0x2e5c7e }),
@@ -118,6 +121,8 @@ const building = new THREE.Group();
 three.add(building);
 
 // ── desenho do prédio ─────────────────────────────────────────────────────
+
+const STAIR_W = 3.0;   // largura do lance: cabem duas faixas de robô
 
 const box = (w, h, d, material) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
 
@@ -145,12 +150,12 @@ function drawPlatform(floor) {
   // A laje é o pentágono extrudado para baixo: é a espessura dela que se lê como
   // "andar" quando o prédio é olhado de lado.
   const s = new THREE.Shape(shape.map((pt) => new THREE.Vector2(pt.wx, pt.wz)));
-  // A extrusão já traz dois grupos de face — as tampas e as laterais —, então o
-  // piso claro e a borda escura saem do mesmo mesh. Um plano separado por cima
-  // ficava com a normal para baixo e a plataforma aparecia preta.
+  // A extrusão traz dois grupos de face, nesta ordem: as tampas e as laterais.
+  // Invertê-los pintava o topo de escuro e a borda de claro — era isso que
+  // deixava os andares de cima apagados.
   const slabGeo = new THREE.ExtrudeGeometry(s, { depth: 0.45, bevelEnabled: false });
   slabGeo.rotateX(Math.PI / 2);
-  g.add(put(new THREE.Mesh(slabGeo, [mat.slab, mat.floor]), 0, y, 0));
+  g.add(put(new THREE.Mesh(slabGeo, [mat.floor, mat.slab]), 0, y, 0));
 
   g.add(outline([...shape, shape[0]], mat.edge, y + 0.05));
 
@@ -171,26 +176,58 @@ function drawPartitions(floor) {
   const y = levelY(floor);
   for (let i = 1; i < ROOMS_PER_FLOOR; i++) {
     const at = world((PLATE.x / ROOMS_PER_FLOOR) * i, PLATE.z * 0.42, floor);
-    g.add(put(box(0.12, 1.2, PLATE.z * 0.84, mat.wall), at.wx, y + 0.6, at.wz));
+    g.add(put(box(0.1, 0.55, PLATE.z * 0.86, mat.divider), at.wx, y + 0.275, at.wz));
   }
   return g;
 }
 
-/** O lance que liga `floor` ao andar de cima: uma caixa por degrau. */
+/**
+ * O lance que liga `floor` ao andar de cima: uma caixa por degrau, mais as duas
+ * laterais e o patamar de desembarque. Sem as laterais os degraus flutuavam soltos
+ * e a subida parecia acontecer onde não havia escada.
+ */
 function drawStairs(floor) {
   const g = new THREE.Group();
-  let prev = stairFoot(floor);
+  const foot = stairFoot(floor);
+  const head = stairHead(floor);
+  const dx = head.wx - foot.wx;
+  const dz = head.wz - foot.wz;
+  const runTotal = Math.hypot(dx, dz);
+  const yaw = Math.atan2(dx, dz);
+  const width = STAIR_W;
+
+  let prev = foot;
   for (const st of stairSteps(floor)) {
     const h = st.wy - prev.wy;
-    const dx = st.wx - prev.wx;
-    const dz = st.wz - prev.wz;
-    const run = Math.hypot(dx, dz);
-    const step = box(2.6, Math.max(0.2, h), run + 0.12, mat.step);
-    step.position.set((st.wx + prev.wx) / 2, st.wy - h / 2, (st.wz + prev.wz) / 2);
-    step.rotation.y = Math.atan2(dx, dz);
+    const run = Math.hypot(st.wx - prev.wx, st.wz - prev.wz);
+    // O degrau é um bloco cheio até o piso do degrau anterior: escada de
+    // concreto, não tábua no ar.
+    const rise = Math.max(0.22, h);
+    const step = box(width, rise, run + 0.06, mat.step);
+    step.position.set((st.wx + prev.wx) / 2, st.wy - rise / 2, (st.wz + prev.wz) / 2);
+    step.rotation.y = yaw;
     g.add(step);
     prev = st;
   }
+
+  // As duas laterais, seguindo a inclinação do lance.
+  const pitch = -Math.atan2(head.wy - foot.wy, runTotal);
+  for (const side of [-1, 1]) {
+    const rail = box(0.18, 0.5, runTotal, mat.slab);
+    const off = new THREE.Vector3(Math.cos(yaw) * side * (width / 2), 0, -Math.sin(yaw) * side * (width / 2));
+    rail.position.set((foot.wx + head.wx) / 2 + off.x, (foot.wy + head.wy) / 2 + 0.3, (foot.wz + head.wz) / 2 + off.z);
+    rail.rotation.set(pitch, yaw, 0, 'YXZ');
+    rail.rotation.y = yaw;
+    rail.rotation.x = pitch;
+    g.add(rail);
+  }
+
+  // Patamar no topo: onde o robô desembarca antes de andar pelo corredor.
+  const land = box(width + 0.4, 0.3, 1.6, mat.step);
+  land.position.set(head.wx, head.wy - 0.15, head.wz);
+  land.rotation.y = yaw;
+  g.add(land);
+
   return g;
 }
 
@@ -251,14 +288,23 @@ function drawBuilding(floors) {
 function mountProp(prop) {
   const g = new THREE.Group();
   if (prop.kind === 'shelf') {
-    g.add(put(box(1.5, 1.6, 0.5, mat.furniture), 0, 0.8, 0));
-    for (let i = 0; i < 2; i++) g.add(put(box(1.32, 0.08, 0.56, mat.dark), 0, 0.62 + i * 0.55, 0));
+    // estante: duas laterais, prateleiras e o vão escuro no fundo
+    g.add(put(box(0.14, 1.7, 0.6, mat.furniture), -0.7, 0.85, 0));
+    g.add(put(box(0.14, 1.7, 0.6, mat.furniture), 0.7, 0.85, 0));
+    g.add(put(box(1.5, 0.12, 0.62, mat.furniture), 0, 1.7, 0));
+    g.add(put(box(1.4, 1.6, 0.1, mat.dark), 0, 0.85, -0.26));
+    for (let i = 0; i < 3; i++) g.add(put(box(1.36, 0.1, 0.58, mat.furniture), 0, 0.3 + i * 0.5, 0));
   } else {
-    // mesa: tampo, pé e a tela virada para quem trabalha
-    g.add(put(box(1.9, 0.14, 1.0, mat.furniture), 0, 0.72, 0));
-    g.add(put(box(0.22, 0.72, 0.22, mat.dark), 0, 0.36, 0));
-    g.add(put(box(1.1, 0.62, 0.08, mat.screen), 0, 1.16, -0.3));
-    g.add(put(box(1.2, 0.72, 0.14, mat.furniture), 0, 1.16, -0.36));
+    // mesa: tampo, dois pés, a tela virada para quem trabalha e a cadeira
+    g.add(put(box(1.9, 0.12, 1.0, mat.furniture), 0, 0.74, 0));
+    g.add(put(box(0.14, 0.74, 0.8, mat.furniture), -0.82, 0.37, 0));
+    g.add(put(box(0.14, 0.74, 0.8, mat.furniture), 0.82, 0.37, 0));
+    g.add(put(box(1.05, 0.6, 0.07, mat.screen), 0, 1.12, -0.3));
+    g.add(put(box(1.15, 0.7, 0.12, mat.furniture), 0, 1.12, -0.36));
+    // cadeira: assento e encosto, do lado de quem usa
+    g.add(put(box(0.6, 0.08, 0.6, mat.furniture), 0, 0.46, 0.85));
+    g.add(put(box(0.6, 0.55, 0.09, mat.furniture), 0, 0.72, 1.1));
+    g.add(put(box(0.1, 0.46, 0.1, mat.dark), 0, 0.23, 0.85));
   }
   g.position.set(prop.wx, prop.wy, prop.wz);
   building.add(g);
@@ -345,11 +391,13 @@ function mountBot(agent, at) {
   const shell = agent.isMain
     ? new THREE.MeshLambertMaterial({ map: RAINBOW })
     : new THREE.MeshLambertMaterial({ color: hueColor(hue) });
-  const dark = new THREE.MeshLambertMaterial({ color: 0x0d141c });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x2b3746 });
 
   const g = new THREE.Group();
-  g.add(put(box(0.34, 0.3, 1.15, dark), -0.42, 0.15, 0));   // esteira
-  g.add(put(box(0.34, 0.3, 1.15, dark), 0.42, 0.15, 0));    // esteira
+  // A esteira é o que toca o chão: escura, mas não tão escura quanto a laje —
+  // com a mesma cor, o robô parecia afundado no piso.
+  g.add(put(box(0.34, 0.32, 1.15, dark), -0.42, 0.16, 0));   // esteira
+  g.add(put(box(0.34, 0.32, 1.15, dark), 0.42, 0.16, 0));    // esteira
   g.add(put(box(1.16, 1.0, 1.0, shell), 0, 0.82, 0));       // carcaça
   g.add(put(box(0.5, 0.09, 0.12, shell), 0, 1.37, 0));      // alça
 

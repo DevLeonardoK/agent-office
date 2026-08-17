@@ -12,7 +12,7 @@ import {
   createScene, apply, rebuild, roomTiles, roomQuad, ROOMS_PER_FLOOR,
   DOOR, STATIONS, MAIN_ROOM, floorCount, buildingBounds, platformShape, platformOrigin,
   plateOf, world, levelY, stairSteps, stairFoot, stairHead, STEPS, LEVEL, STAGGER,
-  PLATE, GROUND_FLOOR, GROUND_PLATE, WALL_H,
+  PLATE, GROUND_FLOOR, GROUND_PLATE, WALL_H, STAIR_LANES, stairLaneOffset,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { appendEvent, logPathFor } from './logstore.mjs';
@@ -868,6 +868,40 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('a saída termina na porta, no térreo',
      Math.abs(legs[legs.length - 1].wy - levelY(GROUND_FLOOR)) < 0.01 &&
      Math.abs(legs[legs.length - 1].wx - DOOR.wx) < 0.01);
+}
+
+// ── faixas da escada: dois robôs não sobem no mesmo degrau (issue #18) ─────
+{
+  const s = createScene();
+  const term = { kind: 'terminal', key: 'terminal', label: 'terminal' };
+  const lib = { kind: 'library', key: 'library', label: 'biblioteca' };
+
+  // Dois agentes do 1º andar descem para estações ao mesmo tempo.
+  apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
+  apply(s, evt({ kind: 'spawn', agentId: 'a2', agentType: 'Plan' }));
+  const c1 = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: term }));
+  const c2 = apply(s, evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'WebFetch', prop: lib }));
+
+  const stairsOf = (c) => cmdsOf(c, 'agent-move').filter((m) => m.kind === 'stair');
+  const s1 = stairsOf(c1);
+  const s2 = stairsOf(c2);
+  ok('os dois usam a escada', s1.length === STEPS && s2.length === STEPS);
+
+  // Nenhum degrau do primeiro coincide com um degrau do segundo.
+  let colisoes = 0;
+  for (const p of s1) {
+    for (const q of s2) {
+      if (Math.abs(p.wy - q.wy) < 0.01 && Math.hypot(p.wx - q.wx, p.wz - q.wz) < 0.8) colisoes++;
+    }
+  }
+  ok('os dois sobem em faixas separadas', colisoes === 0, `${colisoes} degraus coincidentes`);
+  ok('a escada tem as faixas declaradas', STAIR_LANES >= 2);
+  ok('as faixas são perpendiculares à subida', (() => {
+    const a = stairLaneOffset(0, 0);
+    const b = stairLaneOffset(0, 1);
+    return Math.hypot(a.x - b.x, a.z - b.z) > 0.8;
+  })());
+  { const v = invariantsHold(s); ok('invariantes valem com dois na escada', v.ok, v.detail); }
 }
 
 // ── o renderizador ao menos analisa ───────────────────────────────────────

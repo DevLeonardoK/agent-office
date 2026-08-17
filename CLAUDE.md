@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `three.js` e `motion.dev` estão
 vendorizadas em `public/vendor/` como bundles fechados.
 
 ```
-node selftest.mjs        # 196 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 201 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -32,6 +32,17 @@ coisa vira aviso de erro no transcript do usuário, a cada ferramenta usada.
 **`MIME` em `server.mjs` precisa de `.mjs`.** Sem isso o navegador recebe
 `application/octet-stream` e recusa o módulo — a página fica em branco, sem erro
 visível na aba de rede.
+
+**A extrusão entrega tampas primeiro, laterais depois.** `ExtrudeGeometry` gera
+dois grupos de face nessa ordem; passar `[lateral, tampa]` pinta o topo da
+plataforma com a cor da borda e o andar inteiro aparece apagado. Medido em Node
+com `boundingBox` e `groups` — quando a dúvida é de geometria, meça, não olhe.
+
+**Duas faixas por lance de escada.** O pé do lance é o mesmo ponto para todos, e
+dois robôs subindo ao mesmo tempo se sobrepunham no degrau. `stairLaneOffset` dá
+a faixa perpendicular, e o `a.flight` fica marcado até o próximo movimento do
+robô — o trajeto é calculado de uma vez, mas percorrido em tempo, e é isso que
+permite saber quem ainda está na escada.
 
 **Nada visível pode depender de uma animação começar.** Animações WAAPI de
 opacidade ficam pendentes numa rajada de eventos, e o que deveria surgir fica

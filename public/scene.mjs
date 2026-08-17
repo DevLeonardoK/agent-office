@@ -157,21 +157,44 @@ export const stairFoot = (floor) => world(stairLx, stairFootLz, floor);
 /** O topo do mesmo lance, já no andar de cima. */
 export const stairHead = (floor) => world(stairLx, stairHeadLz, floor + 1);
 
+// Largura útil do lance: cabem duas faixas de robô lado a lado. É o que permite
+// dois subirem ao mesmo tempo sem se atropelar (issue #18).
+export const STAIR_LANES = 2;
+const LANE_GAP = 0.95;
+
 /**
- * Os degraus de um lance, do pé ao topo. Interpola posição e altura: como o
- * andar de cima está deslocado na diagonal, o lance sobe torto no mundo — e é
- * assim que ele aparece na referência.
+ * O deslocamento lateral da faixa `lane` no lance: perpendicular à subida. A
+ * faixa 0 fica no meio-esquerda, a 1 no meio-direita.
  */
-export function stairSteps(floor) {
+export function stairLaneOffset(floor, lane) {
   const a = stairFoot(floor);
   const b = stairHead(floor);
+  const dx = b.wx - a.wx;
+  const dz = b.wz - a.wz;
+  const len = Math.hypot(dx, dz) || 1;
+  // perpendicular no plano do chão
+  const px = -dz / len;
+  const pz = dx / len;
+  const k = (lane % STAIR_LANES) - (STAIR_LANES - 1) / 2;
+  return { x: px * k * LANE_GAP, z: pz * k * LANE_GAP };
+}
+
+/**
+ * Os degraus de um lance, do pé ao topo, na faixa `lane`. Interpola posição e
+ * altura: como o andar de cima está deslocado na diagonal, o lance sobe torto no
+ * mundo — e é assim que ele aparece na referência.
+ */
+export function stairSteps(floor, lane = 0) {
+  const a = stairFoot(floor);
+  const b = stairHead(floor);
+  const off = stairLaneOffset(floor, lane);
   const out = [];
   for (let i = 1; i <= STEPS; i++) {
     const t = i / STEPS;
     out.push({
-      wx: a.wx + (b.wx - a.wx) * t,
+      wx: a.wx + (b.wx - a.wx) * t + off.x,
       wy: a.wy + (b.wy - a.wy) * t,
-      wz: a.wz + (b.wz - a.wz) * t,
+      wz: a.wz + (b.wz - a.wz) * t + off.z,
       floor: t < 1 ? floor : floor + 1,
     });
   }
@@ -333,6 +356,8 @@ function ensureAgent(scene, id, type, cmds, entry) {
       tool: null,
       propKey: null,
       away: false,        // fora do cômodo, descido ao térreo usando uma estação
+      flight: null,       // lance de escada que está usando, se estiver
+      lane: 0,            // faixa dentro do lance, para dois não se atropelarem
       toolCount: 0,
       since: Date.now(),
     };
@@ -442,6 +467,11 @@ function walkAlong(scene, a, points, cmds, kind = 'walk') {
  * vazio na diagonal.
  */
 function moveTo(scene, a, target, cmds) {
+  // O trajeto é calculado de uma vez, mas o robô leva tempo para andá-lo: o
+  // `flight` fica marcado até o próximo movimento dele. É assim que a escolha de
+  // faixa sabe quem ainda está no lance — sem isso, dois que saem no mesmo
+  // instante escolhiam a mesma faixa e subiam um dentro do outro.
+  a.flight = null;
   const here = a.floor ?? Math.floor(a.room / ROOMS_PER_FLOOR);
   if (target.floor !== here) {
     stairsTo(scene, a, target, cmds);
@@ -465,8 +495,20 @@ function stairsTo(scene, a, target, cmds) {
   for (let f = from; up ? f < to : f > to; f += up ? 1 : -1) {
     // Subindo, o lance é o que sai de f; descendo, o que chega a f.
     const flight = up ? f : f - 1;
-    const board = up ? stairFoot(flight) : stairHead(flight);
-    const climb = up ? stairSteps(flight) : [...stairSteps(flight)].reverse().slice(1).concat([stairFoot(flight)]);
+
+    // Faixa livre do lance: com o pé do lance sendo o mesmo ponto para todos, dois
+    // robôs subindo ao mesmo tempo se sobrepunham no degrau (issue #18).
+    const taken = new Set([...scene.agents.values()].filter((o) => o !== a && o.flight === flight).map((o) => o.lane));
+    let lane = 0;
+    while (taken.has(lane) && lane < STAIR_LANES - 1) lane++;
+    a.flight = flight;
+    a.lane = lane;
+
+    const off = stairLaneOffset(flight, lane);
+    const shift = (p) => ({ ...p, wx: p.wx + off.x, wz: p.wz + off.z });
+    const board = shift(up ? stairFoot(flight) : stairHead(flight));
+    const steps = stairSteps(flight, lane);
+    const climb = up ? steps : [...steps].reverse().slice(1).concat([shift(stairFoot(flight))]);
 
     walkAlong(scene, a, walkPath(a, board, board.floor === GROUND_FLOOR ? GROUND_LANE : LANE), cmds);
     walkAlong(scene, a, climb, cmds, 'stair');
