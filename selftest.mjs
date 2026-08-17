@@ -238,37 +238,40 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   { const v = invariantsHold(s); ok('invariantes valem com estações em uso', v.ok, v.detail); }
 }
 
-// ── a porta do pai: o filho surge no cômodo de quem o convocou ────────────
+// ── todo subagente entra pela porta do prédio e sobe a escada ──────────────
 {
   const s = createScene();
-  // o principal convoca um subagente: caminha até a porta e fica lá.
+  // o principal convoca um subagente
   apply(s, evt({ kind: 'tool_start', tool: 'Task', prop: { kind: 'door', key: 'door', label: 'porta' } }));
   const pai = s.agents.get('main');
 
   const c = apply(s, evt({ kind: 'spawn', agentId: 'ag-1', agentType: 'Explore' }));
   const enter = cmdsOf(c, 'agent-enter')[0];
-  ok('o filho nasce ao lado do pai', enter && Math.hypot(enter.wx - pai.wx, enter.wz - pai.wz) < 2,
-     `enter=(${enter?.wx},${enter?.wz}) pai=(${pai.wx},${pai.wz})`);
+  ok('o filho entra pela porta do prédio, não ao lado do pai',
+     enter && Math.abs(enter.wx - DOOR.wx) < 0.01 && Math.abs(enter.wz - DOOR.wz) < 0.01,
+     `enter=(${enter?.wx},${enter?.wz})`);
+  ok('o filho nasce no térreo, mesmo com o pai num andar', enter.wy === levelY(GROUND_FLOOR));
 
-  const move = cmdsOf(c, 'agent-move')[0];
-  ok('e caminha dali até o próprio cômodo', move && (move.wx !== enter.wx || move.wz !== enter.wz),
-     `move=(${move?.wx},${move?.wz})`);
+  const legs = cmdsOf(c, 'agent-move');
+  ok('o filho sobe a escada até o cômodo', legs.some((m) => m.kind === 'stair'));
+  ok('e chega ao próprio andar', Math.abs(legs[legs.length - 1].wy - levelY(0)) < 0.01);
 
   const filho = s.agents.get('ag-1');
-  ok('o cômodo do filho não é o do pai', filho.room !== s.agents.get('main').room,
-     `filho=${filho.room} pai=${s.agents.get('main').room}`);
+  ok('o cômodo do filho não é o do pai', filho.room !== pai.room, `filho=${filho.room} pai=${pai.room}`);
   ok('a linhagem não cria móvel: só a mobília dos dois cômodos', s.props.size === 4);
+  { const v = invariantsHold(s); ok('invariantes valem depois da chegada do filho', v.ok, v.detail); }
 }
 
-// ── pai que já saiu não quebra a chegada do filho ─────────────────────────
+// ── quem chega entra igual, com ou sem pai no prédio ───────────────────────
 {
   const s = createScene();
   apply(s, evt({ kind: 'tool_start', tool: 'Task', prop: { kind: 'door', key: 'door', label: 'porta' } }));
   apply(s, evt({ kind: 'stop', agentId: 'main' }));   // o pai vai embora antes do filho chegar
   const c = apply(s, evt({ kind: 'spawn', agentId: 'ag-1', agentType: 'Explore' }));
   const enter = cmdsOf(c, 'agent-enter')[0];
-  ok('sem pai no prédio, o filho entra pela porta do prédio', enter && enter.x === DOOR.x && enter.y === DOOR.y,
-     `enter=(${enter?.x},${enter?.y})`);
+  ok('sem pai no prédio, o filho entra pela mesma porta',
+     enter && Math.abs(enter.wx - DOOR.wx) < 0.01 && Math.abs(enter.wz - DOOR.wz) < 0.01,
+     `enter=(${enter?.wx},${enter?.wz})`);
 }
 
 // ── saída libera o cômodo, que é reciclado ──────────────────────────────────
@@ -399,38 +402,6 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('móvel do cômodo não manda o robô ao térreo', a.away === false && insideRoom(a, a.room));
 }
 
-// ── a porta do pai: o filho surge no cômodo de quem o convocou ────────────
-{
-  const s = createScene();
-  // o principal convoca um subagente: caminha até a porta e fica lá.
-  apply(s, evt({ kind: 'tool_start', tool: 'Task', prop: { kind: 'door', key: 'door', label: 'porta' } }));
-  const pai = s.agents.get('main');
-
-  const c = apply(s, evt({ kind: 'spawn', agentId: 'ag-1', agentType: 'Explore' }));
-  const enter = cmdsOf(c, 'agent-enter')[0];
-  ok('o filho nasce ao lado do pai', enter && Math.hypot(enter.wx - pai.wx, enter.wz - pai.wz) < 2,
-     `enter=(${enter?.wx},${enter?.wz}) pai=(${pai.wx},${pai.wz})`);
-
-  const move = cmdsOf(c, 'agent-move')[0];
-  ok('e caminha dali até o próprio cômodo', move && (move.wx !== enter.wx || move.wz !== enter.wz),
-     `move=(${move?.wx},${move?.wz})`);
-
-  const filho = s.agents.get('ag-1');
-  ok('o cômodo do filho não é o do pai', filho.room !== s.agents.get('main').room,
-     `filho=${filho.room} pai=${s.agents.get('main').room}`);
-  ok('a linhagem não cria móvel: só a mobília dos dois cômodos', s.props.size === 4);
-}
-
-// ── pai que já saiu não quebra a chegada do filho ─────────────────────────
-{
-  const s = createScene();
-  apply(s, evt({ kind: 'tool_start', tool: 'Task', prop: { kind: 'door', key: 'door', label: 'porta' } }));
-  apply(s, evt({ kind: 'stop', agentId: 'main' }));   // o pai vai embora antes do filho chegar
-  const c = apply(s, evt({ kind: 'spawn', agentId: 'ag-1', agentType: 'Explore' }));
-  const enter = cmdsOf(c, 'agent-enter')[0];
-  ok('sem pai no prédio, o filho entra pela porta do prédio', enter && enter.x === DOOR.x && enter.y === DOOR.y,
-     `enter=(${enter?.x},${enter?.y})`);
-}
 
 // ── saída libera o cômodo, que é reciclado ──────────────────────────────────
 {

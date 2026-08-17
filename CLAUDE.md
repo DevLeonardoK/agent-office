@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `three.js` e `motion.dev` estão
 vendorizadas em `public/vendor/` como bundles fechados.
 
 ```
-node selftest.mjs        # 201 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 199 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -135,6 +135,12 @@ posicionamento inteiro em Node.
   enquadramento automático. Enquanto ninguém girou, o enquadramento se refaz a
   cada mudança do prédio; depois de girar, o ângulo é do usuário. Para print,
   `?view=azim,elev,zoom` fixa a órbita — o headless não arrasta o mouse.
+
+**Todo subagente entra pela porta do prédio.** Nasce no térreo e sobe a escada
+até o cômodo dele — inclusive o filho convocado por outro agente. A issue #10
+tinha feito o filho nascer ao lado do pai; num prédio de vários andares isso o
+fazia simplesmente aparecer no andar de cima, sem trajeto. O `doorAgent` e a
+`parentDoor` saíram junto.
 
 **Mudar de andar é sempre pela escada.** Quem decide é o `moveTo`: se o destino
 está em outro andar, ele roteia por `stairsTo`. Antes cada chamador escolhia, e o
