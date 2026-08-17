@@ -34,6 +34,10 @@ function ok(label, cond, detail) {
 const cmdsOf = (list, op) => list.filter((c) => c.op === op);
 const evt = (o) => ({ at: Date.now(), session: 's', agentId: 'main', agentType: 'main', ...o });
 const deskProp = (name) => ({ kind: 'desk', key: 'file:' + name, label: name });
+// A mobília é do cômodo (issue #14): a chave é do cômodo e do tipo, e o nome do
+// arquivo não entra nela.
+const furniture = (s, slot) => [...s.props.values()].filter((p) => p.slot === slot);
+const roomProp = (s, slot, kind) => s.props.get(`room${slot}|${kind}`);
 
 // ── invariantes de layout ──────────────────────────────────────────────────
 
@@ -133,12 +137,13 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('agente ganha um cômodo', s.agents.get('a1').room != null);
 
   const c2 = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('auth.ts') }));
-  ok('tool_start cria o móvel', cmdsOf(c2, 'prop-add').length === 1);
-  ok('tool_start acende o móvel', cmdsOf(c2, 'prop-hit').length === 1);
+  ok('tool_start não cria móvel', cmdsOf(c2, 'prop-add').length === 0);
+  ok('tool_start acende o móvel do cômodo', cmdsOf(c2, 'prop-hit').length === 1);
 
   const a = s.agents.get('a1');
-  const p = s.props.get('a1|file:auth.ts');
-  ok('móvel nasce no cômodo do dono', p && p.owner === 'a1' && insideRoom(p.x, p.y, a.room));
+  const p = roomProp(s, a.room, 'desk');
+  ok('a mesa nasceu com o cômodo', p && p.slot === a.room && insideRoom(p.x, p.y, a.room));
+  ok('a mobília chegou com o ocupante', cmdsOf(c1, 'prop-add').length === 2);
   ok('status vira trabalhando', a.status === 'working' && a.tool === 'Read');
   { const v = invariantsHold(s); ok('invariantes valem com um agente', v.ok, v.detail); }
 
@@ -159,7 +164,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('a ação seguinte limpa o erro', s.agents.get('a1').status === 'working');
 }
 
-// ── dois agentes no mesmo arquivo produzem dois móveis ──────────────────────
+// ── dois agentes no mesmo arquivo usam a mesa de cada cômodo (issue #14) ────
 {
   const s = createScene();
   const prop = deskProp('shared.ts');
@@ -168,10 +173,13 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
 
   const a1 = s.agents.get('a1');
   const a2 = s.agents.get('a2');
-  ok('mesmo arquivo, dois móveis', s.props.size === 2);
-  ok('cada móvel no cômodo do seu dono',
-     insideRoom(s.props.get('a1|file:shared.ts').x, s.props.get('a1|file:shared.ts').y, a1.room) &&
-     insideRoom(s.props.get('a2|file:shared.ts').x, s.props.get('a2|file:shared.ts').y, a2.room));
+  ok('nenhum móvel carrega o nome do arquivo', ![...s.props.keys()].some((k) => k.includes('shared.ts')));
+  ok('cada um usa a mesa do próprio cômodo',
+     a1.propKey === `room${a1.room}|desk` && a2.propKey === `room${a2.room}|desk`);
+  ok('a mesa de cada cômodo está dentro dele',
+     insideRoom(roomProp(s, a1.room, 'desk').x, roomProp(s, a1.room, 'desk').y, a1.room) &&
+     insideRoom(roomProp(s, a2.room, 'desk').x, roomProp(s, a2.room, 'desk').y, a2.room));
+  ok('o arquivo tocado fica no agente, para o elenco', a1.subject === 'shared.ts');
   ok('os dois estão em cômodos diferentes', a1.room !== a2.room);
   { const v = invariantsHold(s); ok('invariantes valem com dois agentes', v.ok, v.detail); }
 }
@@ -189,17 +197,40 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   { const v = invariantsHold(s); ok('invariantes valem com o andar cheio', v.ok, v.detail); }
 }
 
-// ── mais móveis do que cabem confortavelmente num cômodo ────────────────────
+// ── ferramenta não deixa marca: 40 usos, mobília igual (issue #14) ──────────
 {
   const s = createScene();
+  apply(s, evt({ kind: 'tool_start', tool: 'Read', prop: deskProp('primeiro.ts') }));
+  const main = s.agents.get('main');
+  const antes = furniture(s, main.room).length;
+
   for (let i = 0; i < 40; i++) {
     apply(s, evt({ kind: 'tool_start', tool: 'Read', prop: deskProp('m' + i + '.ts') }));
   }
-  ok('todo arquivo vira móvel', s.props.size === 40);
-  const main = s.agents.get('main');
-  const fora = [...s.props.values()].filter((p) => !insideRoom(p.x, p.y, main.room));
+  ok('a mobília do cômodo não cresce com o uso', furniture(s, main.room).length === antes, `${antes} → ${furniture(s, main.room).length}`);
+  ok('o cômodo tem a mobília fixa e nada mais', antes === 2);
+  ok('nenhum móvel guarda nome de arquivo', ![...s.props.keys()].some((k) => k.includes('.ts')));
+  ok('o último arquivo tocado fica no agente', s.agents.get('main').subject === 'm39.ts');
+  const fora = furniture(s, main.room).filter((p) => !insideRoom(p.x, p.y, main.room));
   ok('nenhum móvel escapa do cômodo', fora.length === 0, `${fora.length} fora`);
-  { const v = invariantsHold(s); ok('invariantes valem com o cômodo lotado', v.ok, v.detail); }
+  { const v = invariantsHold(s); ok('invariantes valem depois de 40 ferramentas', v.ok, v.detail); }
+}
+
+// ── a ferramenta acende o móvel do tipo dela (issue #14) ────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
+  const slot = s.agents.get('a1').room;
+
+  const c1 = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('x.ts') }));
+  ok('o Read acende a mesa', cmdsOf(c1, 'prop-hit')[0].prop.key === `room${slot}|desk`);
+  ok('acender não cria móvel', cmdsOf(c1, 'prop-add').length === 0);
+
+  const c2 = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Skill', prop: { kind: 'shelf', key: 'shelf', label: 'manuais' } }));
+  ok('o Skill acende a estante', cmdsOf(c2, 'prop-hit')[0].prop.key === `room${slot}|shelf`);
+
+  const c3 = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Esquisita', prop: { kind: 'sofa', key: 'sofa', label: 'sofá' } }));
+  ok('tipo sem móvel próprio cai na mesa', cmdsOf(c3, 'prop-hit')[0].prop.key === `room${slot}|desk`);
 }
 
 // ── estações são singulares e moram no térreo ───────────────────────────────
@@ -236,7 +267,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const filho = s.agents.get('ag-1');
   ok('o cômodo do filho não é o do pai', Math.hypot(filho.x - pai.x, filho.y - pai.y) > 24,
      `filho=(${filho.x},${filho.y})`);
-  ok('nenhum móvel novo foi criado pela linhagem', s.props.size === 0);
+  ok('a linhagem não cria móvel: só a mobília dos dois cômodos', s.props.size === 4);
 }
 
 // ── pai que já saiu não quebra a chegada do filho ─────────────────────────
@@ -273,7 +304,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ];
   const s = createScene();
   const c = rebuild(s, events);
-  ok('rebuild monta os móveis do log', s.props.size === 2);
+  ok('rebuild monta a mobília dos cômodos e a estação usada', s.props.size === 5);
   ok('rebuild monta os agentes do log', s.agents.size === 2);
   ok('rebuild entra instantâneo', cmdsOf(c, 'agent-enter').every((e) => e.instant === true));
   ok('rebuild não anima o movimento', cmdsOf(c, 'agent-move').every((m) => m.instant === true));
@@ -304,17 +335,17 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
 {
   const s = createScene();
   apply(s, evt({ kind: 'spawn', agentId: 'a1', agentType: 'Explore' }));
-  const c1 = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('velho.ts') }));
-  ok('o móvel do primeiro nasce', s.props.has('a1|file:velho.ts') && cmdsOf(c1, 'prop-add').length === 1);
+  apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Read', prop: deskProp('velho.ts') }));
   const room1 = s.agents.get('a1').room;
+  ok('o cômodo do primeiro está mobiliado', furniture(s, room1).length === 2);
 
   const c2 = apply(s, evt({ kind: 'stop', agentId: 'a1', agentType: 'Explore', text: 'saí' }));
-  ok('a saída remove o móvel do ocupante', !s.props.has('a1|file:velho.ts') && cmdsOf(c2, 'prop-remove').length === 1);
+  ok('a saída desmobilia o cômodo', furniture(s, room1).length === 0 && cmdsOf(c2, 'prop-remove').length === 2);
 
   apply(s, evt({ kind: 'spawn', agentId: 'a2', agentType: 'Plan' }));
   apply(s, evt({ kind: 'tool_start', agentId: 'a2', agentType: 'Plan', tool: 'Read', prop: deskProp('novo.ts') }));
   ok('o próximo recicla a vaga já vazia', s.agents.get('a2').room === room1);
-  ok('nenhuma mobília do anterior sobra no cômodo', ![...s.props.values()].some((p) => p.owner === 'a1'));
+  ok('o cômodo reciclado é remobiliado do zero', furniture(s, room1).length === 2 && !s.agents.get('a2').subject === false);
   { const v = invariantsHold(s); ok('invariantes valem após reciclar a vaga', v.ok, v.detail); }
 }
 
@@ -361,8 +392,11 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const main = s.agents.get('main');
   ok('o principal toma o cômodo reservado', main.room === MAIN_ROOM);
   ok('o invasor foi realocado', s.agents.get(squatter.id).room !== MAIN_ROOM);
-  ok('o móvel do realocado o acompanha', cmdsOf(c, 'prop-move').length >= 1 &&
-     insideRoom(s.props.get(squatter.id + '|file:f' + squatter.id.slice(3) + '.ts').x, s.props.get(squatter.id + '|file:f' + squatter.id.slice(3) + '.ts').y, s.agents.get(squatter.id).room));
+  // A mobília é do cômodo: o realocado deixa a do antigo e encontra a do novo.
+  const novo = s.agents.get(squatter.id).room;
+  ok('o cômodo novo do realocado está mobiliado', furniture(s, novo).length === 2);
+  ok('a mobília do realocado fica dentro do cômodo novo',
+     furniture(s, novo).every((p) => insideRoom(p.x, p.y, novo)));
   { const v = invariantsHold(s); ok('invariantes valem após o principal chegar tarde', v.ok, v.detail); }
 }
 

@@ -234,7 +234,9 @@ function mountProp(prop, instant) {
   node.innerHTML =
     `<svg width="76" height="56" viewBox="0 0 76 56">${SYMBOL[prop.kind] || SYMBOL.desk}</svg>` +
     `<span class="prop-label"></span>`;
-  node.querySelector('.prop-label').textContent = prop.label;
+  // Só a estação leva rótulo na planta. A mobília do cômodo é genérica e igual
+  // em todos os cômodos: escrever "mesa" cinco vezes por andar era só ruído.
+  node.querySelector('.prop-label').textContent = prop.fixed ? prop.label : '';
   node.title = prop.detail || prop.label;
   $props.appendChild(node);
   propNodes.set(prop.key, { root: node, timer: 0 });
@@ -248,10 +250,13 @@ function mountProp(prop, instant) {
   return node;
 }
 
-function hitProp(prop, instant) {
-  if (instant) return;   // reacender cada uso do log de uma vez seria só ruído
+function hitProp(prop, instant, subject) {
   const n = propNodes.get(prop.key);
   if (!n) return;
+  // O móvel é fixo e genérico; o que passa por ele agora fica no title, para
+  // quem quiser saber sem ir ao registro.
+  n.root.title = [prop.label, subject, prop.detail].filter(Boolean).join(' · ');
+  if (instant) return;   // reacender cada uso do log de uma vez seria só ruído
   n.root.classList.add('hit');
   clearTimeout(n.timer);
   n.timer = setTimeout(() => n.root.classList.remove('hit'), 2600);
@@ -492,8 +497,10 @@ function renderCast() {
     row.dataset.status = a.status;
     if (a.isMain) row.dataset.main = '';
     row.style.setProperty('--h', hueOf(a));
+    // O que a ferramenta tocou vem do agente: com mobília fixa (issue #14) o
+    // móvel não carrega mais o nome do arquivo.
     const doing = a.tool
-      ? `<b>${esc(VERB[a.tool] || a.tool)}</b> ${esc(propLabel(a.propKey))}`
+      ? `<b>${esc(VERB[a.tool] || a.tool)}</b> ${esc(a.subject || propLabel(a.propKey))}`
       : `ocioso · ${a.toolCount} ${a.toolCount === 1 ? 'ação' : 'ações'}`;
     row.innerHTML =
       `<i class="chip"></i>` +
@@ -604,7 +611,7 @@ function run(cmds) {
   for (const c of cmds) {
     switch (c.op) {
       case 'prop-add': mountProp(c.prop, c.instant); break;
-      case 'prop-hit': hitProp(c.prop, c.instant); break;
+      case 'prop-hit': hitProp(c.prop, c.instant, c.subject); break;
       case 'prop-move': moveProp(c.prop, c.instant); break;
       case 'prop-remove': removeProp(c.key); break;
       case 'agent-enter':

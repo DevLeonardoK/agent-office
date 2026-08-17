@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `motion.dev` está vendorizada em
 `public/vendor/motion.js` como bundle fechado.
 
 ```
-node selftest.mjs        # 142 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 153 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -66,11 +66,28 @@ Uma só: o prédio empilhado, enquadrado por `buildingRect(scene)`. Havia també
 uma vista de andar cheio; ela foi removida — no prédio isométrico, duas
 leituras do mesmo espaço confundiam mais do que ajudavam.
 
+## Mobília fixa (issue #14)
+
+A mobília é do **cômodo**, não do agente e não do evento: montada quando o
+cômodo ganha ocupante (`furnishRoom`), desmontada quando esvazia
+(`unfurnishRoom`), com chave `room<slot>|<kind>`. Usar uma ferramenta **acende**
+o móvel que já está lá — nunca cria. Tipo sem móvel próprio cai na mesa.
+
+O nome do arquivo (ou comando, ou busca) não vira móvel: vive no registro, no
+`a.subject` que o elenco mostra, e no `title` do móvel. Antes, cada ferramenta
+criava um móvel com o nome do arquivo, e o cômodo enchia de marcas do passado —
+o oposto de *a planta mostra o agora*.
+
+As quatro **estações** do térreo seguem por outro caminho (`ensureStation`):
+singulares, criadas no primeiro uso, com rótulo na planta. A mobília do cômodo
+não tem rótulo — escrever "mesa" cinco vezes por andar era só ruído.
+
 ## Mapear uma ferramenta nova para um móvel
 
 Três lugares, nesta ordem:
 
-1. `shape.mjs` → `propFor()`: qual `kind` a ferramenta produz.
+1. `shape.mjs` → `propFor()`: qual `kind` a ferramenta produz. Se o `kind` não
+   for estação nem estiver em `ROOM_FURNITURE`, ele cai na mesa.
 2. `public/scene.mjs` → `STATIONS`, se o recurso for singular (existe um só no
    prédio e merece endereço fixo no térreo). Arquivos não entram aqui — eles
    viram móvel dentro do cômodo do agente que os tocou, com chave composta por

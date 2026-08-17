@@ -209,17 +209,50 @@ function walkPath(from, to, lane) {
 }
 
 /**
- * Posição do n-ésimo móvel dentro de um cômodo. Os móveis encostam na parede
- * do fundo e avançam em duas fileiras — como as baias da referência.
+ * A mobília fixa de um cômodo (issue #14). É do cômodo, não do agente: montada
+ * quando o cômodo ganha ocupante, desmontada quando ele esvazia, e nunca criada
+ * por uso de ferramenta. Usar uma ferramenta acende o móvel que já está lá.
+ *
+ * A mesa cobre arquivo e ferramenta sem casa própria; a estante cobre os
+ * manuais. Os demais recursos são estações, singulares no térreo.
  */
-function propSlot(slot, n) {
+const ROOM_FURNITURE = [
+  { kind: 'desk', label: 'mesa', at: 0.30 },
+  { kind: 'shelf', label: 'manuais', at: 0.72 },
+];
+
+/** A chave do móvel fixo: do cômodo e do tipo, sem identidade de arquivo. */
+const roomPropKey = (slot, kind) => `room${slot}|${kind}`;
+
+/** Monta a mobília do cômodo. Idempotente: chamar de novo não duplica. */
+function furnishRoom(scene, slot, cmds) {
   const r = roomTiles(slot);
-  const col = n % 2;
-  const row = Math.floor(n / 2);
-  const wx = r.wx + r.w * (col === 0 ? 0.3 : 0.72);
-  // Preso ao cômodo: com muitos móveis a fileira empilha até a frente e para.
-  const wy = Math.min(r.wy + 0.7 + row * 1.15, r.wy + r.d - 0.7);
-  return { wx, wy, floor: r.floor, ...iso(wx, wy, r.floor) };
+  for (const f of ROOM_FURNITURE) {
+    const key = roomPropKey(slot, f.kind);
+    if (scene.props.has(key)) continue;
+    const wx = r.wx + r.w * f.at;
+    const wy = r.wy + r.d * 0.34;
+    const p = {
+      kind: f.kind, key, label: f.label, room: 'CÔMODO', fixed: false, slot,
+      wx, wy, ...iso(wx, wy, r.floor), uses: 0, born: Date.now(),
+    };
+    scene.props.set(key, p);
+    cmds.push({ op: 'prop-add', prop: p });
+  }
+}
+
+/** Desmobilia o cômodo: chamado quando ele deixa de ter ocupante. */
+function unfurnishRoom(scene, slot, cmds) {
+  for (const f of ROOM_FURNITURE) {
+    const key = roomPropKey(slot, f.kind);
+    if (!scene.props.delete(key)) continue;
+    cmds.push({ op: 'prop-remove', key });
+  }
+}
+
+/** O móvel do cômodo que atende àquele tipo de ferramenta. A mesa é o padrão. */
+function roomPropFor(scene, slot, kind) {
+  return scene.props.get(roomPropKey(slot, kind)) || scene.props.get(roomPropKey(slot, 'desk'));
 }
 
 /** Onde o robô encosta para usar um móvel do próprio cômodo: logo à frente. */
@@ -286,23 +319,14 @@ function relocateAgent(scene, agent, cmds) {
   const dst = firstFreeRoom(taken);
 
   agent.room = dst;
+  // A mobília é do cômodo: a do antigo fica para trás (o cômodo esvaziou) e a do
+  // novo já está lá — ou é montada agora.
+  unfurnishRoom(scene, from, cmds);
+  furnishRoom(scene, dst, cmds);
+  agent.propKey = null;
   // Muda de cômodo andando pelo corredor, como qualquer outro trajeto: o salto
   // instantâneo era o que fazia a realocação parecer teleporte.
   moveTo(scene, agent, roomHome(dst), cmds);
-
-  // Os móveis vão junto: reocupam as mesmas vagas, agora no cômodo novo. Em
-  // isométrico não dá para somar um deslocamento — a vaga é que é a verdade.
-  let n = 0;
-  for (const p of scene.props.values()) {
-    if (p.owner !== agent.id || p.fixed) continue;
-    const spot = propSlot(dst, n++);
-    p.x = spot.x;
-    p.y = spot.y;
-    p.wx = spot.wx;
-    p.wy = spot.wy;
-    cmds.push({ op: 'prop-move', prop: p });
-  }
-  agent.deskCursor = n;
 }
 
 /** A porta por onde um filho recém-convocado entra: o cômodo do pai, se ele
@@ -332,7 +356,6 @@ function ensureAgent(scene, id, type, cmds, entry) {
       propKey: null,
       away: false,        // fora do cômodo, descido ao térreo usando uma estação
       toolCount: 0,
-      deskCursor: 0,
       since: Date.now(),
     };
     // Se um subagente já tomou o cômodo reservado do principal, ele cede a vaga
@@ -342,6 +365,7 @@ function ensureAgent(scene, id, type, cmds, entry) {
       if (squatter) relocateAgent(scene, squatter, cmds);
     }
     a.room = allocRoom(scene, a);
+    furnishRoom(scene, a.room, cmds);
     const home = roomHome(a.room);
     // Um filho convocado nasce ao lado do pai (`entry`) e caminha dali até o
     // próprio cômodo. Sem pai no prédio, entra pela porta do térreo e sobe de
@@ -364,28 +388,24 @@ function ensureAgent(scene, id, type, cmds, entry) {
   return a;
 }
 
-function ensureProp(scene, agent, seed, cmds) {
+/**
+ * A estação do térreo, criada na primeira vez que alguém a usa. Chave global —
+ * há uma de cada no prédio inteiro. Móvel de cômodo não passa por aqui: aquele é
+ * mobília fixa, montada com o cômodo (issue #14).
+ */
+function ensureStation(scene, seed, cmds) {
   const station = STATIONS[seed.kind];
-  // Estação: chave global, singular no prédio. Móvel: chave composta por agente
-  // e recurso, então dois agentes no mesmo arquivo produzem dois móveis.
-  const key = station ? seed.key : agent.id + '|' + seed.key;
-
-  let p = scene.props.get(key);
+  let p = scene.props.get(seed.key);
   if (!p) {
-    let pos;
-    if (station) {
+    p = {
+      ...seed, key: seed.key, room: station.label, fixed: true, owner: null,
       // wx/wy vão junto: é deles que sai onde o robô fica em pé na estação.
-      pos = { x: station.x, y: station.y, wx: station.wx, wy: station.wy, room: station.label, fixed: true, owner: null };
-    } else {
-      const s = propSlot(agent.room, agent.deskCursor++);
-      pos = { x: s.x, y: s.y, wx: s.wx, wy: s.wy, room: 'CÔMODO', fixed: false, owner: agent.id };
-    }
-    p = { ...seed, key, ...pos, uses: 0, born: Date.now() };
-    scene.props.set(key, p);
+      x: station.x, y: station.y, wx: station.wx, wy: station.wy,
+      uses: 0, born: Date.now(),
+    };
+    scene.props.set(seed.key, p);
     cmds.push({ op: 'prop-add', prop: p });
   }
-  if (seed.detail) p.detail = seed.detail;
-  p.uses++;
   return p;
 }
 
@@ -503,6 +523,7 @@ export function apply(scene, ev) {
       // linhagem pela porta é a issue #10.
       if (seed.kind === 'door') {
         a.propKey = null;
+        a.subject = null;   // convocar não toca em móvel: nada a mostrar no elenco
         a.away = false;
         // Quem convoca vira a porta de onde o próximo filho vai sair.
         scene.doorAgent = a.id;
@@ -512,8 +533,17 @@ export function apply(scene, ev) {
         break;
       }
 
-      const p = ensureProp(scene, a, seed, cmds);
+      // O que a ferramenta tocou (arquivo, comando, busca) vive no registro e no
+      // elenco — não vira móvel novo na planta (issue #14).
+      a.subject = seed.label || null;
+      const p = STATIONS[seed.kind]
+        ? ensureStation(scene, seed, cmds)
+        : roomPropFor(scene, a.room, seed.kind);
       a.propKey = p.key;
+      // O uso é contado num lugar só: aqui. A estação é compartilhada, e contar
+      // também na criação dava dois usos para a primeira ferramenta.
+      p.uses++;
+      p.detail = seed.detail || undefined;
 
       if (p.fixed) {
         // Estação: recurso singular no térreo. O robô desce de elevador até lá,
@@ -527,7 +557,7 @@ export function apply(scene, ev) {
         a.away = false;
         moveTo(scene, a, standAt(p, a.room), cmds);
       }
-      cmds.push({ op: 'prop-hit', prop: p, by: a.id });
+      cmds.push({ op: 'prop-hit', prop: p, by: a.id, subject: a.subject });
       cmds.push({ op: 'agent-state', agent: a });
       if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'brief' });
       break;
@@ -546,14 +576,9 @@ export function apply(scene, ev) {
       moveTo(scene, a, DOOR_TILE, cmds);
       if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'result' });
       cmds.push({ op: 'agent-leave', id: a.id });
-      // O cômodo é esvaziado: os móveis do ocupante somem com ele, para não
-      // ficarem para o próximo que reciclar a vaga. Estações (dono nulo) ficam.
-      for (const [key, p] of scene.props) {
-        if (p.owner === a.id) {
-          scene.props.delete(key);
-          cmds.push({ op: 'prop-remove', key });
-        }
-      }
+      // O cômodo esvaziou: a mobília dele é desmontada. As estações do térreo,
+      // que são do prédio, ficam.
+      unfurnishRoom(scene, a.room, cmds);
       // O cômodo é liberado: some do elenco e a vaga volta ao pool.
       scene.agents.delete(a.id);
       break;
