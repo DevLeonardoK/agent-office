@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `three.js` e `motion.dev` estão
 vendorizadas em `public/vendor/` como bundles fechados.
 
 ```
-node selftest.mjs        # 230 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 234 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -135,6 +135,11 @@ posicionamento inteiro em Node.
   do meio, outro meio lance. Descer é o mesmo caminho invertido, pelo mesmo lado.
 - **O térreo é maior que os andares**, para caber a praça de entrada com chão à
   frente da porta.
+- **O terreno** (`terrainRect`) é o chão em que o prédio se apoia, com folga em
+  volta e calçada marcada. Sem ele o térreo flutuava no vazio.
+- **Quem termina o serviço sai andando.** O `agent-leave` fica pendente até a fila
+  de pernas do robô esvaziar: ele desce a escada, cruza o térreo e só desaparece na
+  porta. Removê-lo no mesmo quadro fazia o robô sumir de dentro do próprio cômodo.
 - **Escada, não elevador** (`stairFoot`, `stairHead`, `stairSteps`): a viagem
   entre andares é uma sequência de degraus, um comando `agent-move` por degrau.
 - **Texto é DOM**, numa camada sobre o canvas, reposicionado por quadro a partir

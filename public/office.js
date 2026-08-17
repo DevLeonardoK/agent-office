@@ -10,7 +10,7 @@ import {
   createScene, apply, rebuild, floorCount, buildingBounds, platformShape, plateOf,
   roomQuad, world, platformOrigin, levelY, ROOMS_PER_FLOOR, PLATE,
   WALL_H, GROUND_FLOOR, STATIONS, DOOR, stairSteps, stairWell, HUE_COUNT,
-  stairLanding, stairMid, stairDoor, LEVEL,
+  stairLanding, stairMid, stairDoor, LEVEL, terrainRect,
 } from './scene.mjs';
 
 const params = new URLSearchParams(location.search);
@@ -123,6 +123,7 @@ const mat = {
   screen: new THREE.MeshBasicMaterial({ color: 0x0a1520 }),
   screenLit: new THREE.MeshBasicMaterial({ color: 0x2e5c7e }),
   dark: new THREE.MeshLambertMaterial({ color: 0x0a1119 }),
+  terrain: new THREE.MeshLambertMaterial({ color: 0x14202e }),
 };
 
 // O prédio inteiro vive num grupo só: redesenhar é limpar e montar de novo, o
@@ -147,6 +148,23 @@ function outline(points, material, y) {
     points.map((p) => new THREE.Vector3(p.wx, y ?? p.wy, p.wz)),
   );
   return new THREE.Line(geo, material);
+}
+
+/** O terreno em que o prédio se apoia, com a calçada em volta do térreo. */
+function drawTerrain() {
+  const t = terrainRect(scene);
+  const g = new THREE.Group();
+  const w = t.x1 - t.x0;
+  const d = t.z1 - t.z0;
+  g.add(put(box(w, 0.5, d, mat.terrain), (t.x0 + t.x1) / 2, t.y - 0.25, (t.z0 + t.z1) / 2));
+  // Uma faixa de calçada mais clara em volta da pegada do térreo, para o prédio
+  // assentar em algo em vez de nascer do nada.
+  g.add(outline([
+    { wx: t.x0 + 1.6, wz: t.z0 + 1.6 }, { wx: t.x1 - 1.6, wz: t.z0 + 1.6 },
+    { wx: t.x1 - 1.6, wz: t.z1 - 1.6 }, { wx: t.x0 + 1.6, wz: t.z1 - 1.6 },
+    { wx: t.x0 + 1.6, wz: t.z0 + 1.6 },
+  ], mat.line, t.y + 0.01));
+  return g;
 }
 
 /** A plataforma pentagonal de um andar: laje, piso ladrilhado e duas paredes. */
@@ -310,6 +328,7 @@ function drawBuilding(floors) {
   building.clear();
   clearLabels('station');
 
+  building.add(drawTerrain());
   building.add(drawPlatform(GROUND_FLOOR));
   building.add(drawStations());
   building.add(drawDoor());
@@ -450,7 +469,7 @@ function mountBot(agent, at) {
   g.position.set(at.wx ?? agent.wx, at.wy ?? agent.wy, at.wz ?? agent.wz);
   building.add(g);
 
-  const rec = { group: g, face, hue, isMain: agent.isMain, queue: [], mood: 'idle', bob: 0 };
+  const rec = { id: agent.id, group: g, face, hue, isMain: agent.isMain, queue: [], mood: 'idle', bob: 0, leaving: false };
   bots.set(agent.id, rec);
   plateFor(agent);
   return rec;
@@ -484,9 +503,25 @@ function stateBot(agent) {
   rec.face.material.needsUpdate = true;
 }
 
+/**
+ * O robô que terminou o serviço não some do lugar onde estava: ele desce a escada,
+ * atravessa o térreo e só desaparece na porta. A cena já emite o trajeto até a
+ * porta antes do `agent-leave`; aqui o `leave` fica **pendente** até a fila de
+ * pernas esvaziar — sem isso o robô era removido no mesmo quadro e sumia do nada,
+ * de dentro do próprio cômodo.
+ */
 function leaveBot(id) {
   const rec = bots.get(id);
   if (!rec) return;
+  dropLabel('plate:' + id);
+  if (rec.queue.length && !STILL) {
+    rec.leaving = true;
+    return;
+  }
+  removeBot(id, rec);
+}
+
+function removeBot(id, rec) {
   building.remove(rec.group);
   bots.delete(id);
   dropLabel('plate:' + id);
@@ -691,6 +726,9 @@ function tick(now) {
       p.y += rec.bob;
       // A carcaça se vira para onde anda, só o suficiente para se ler.
       rec.group.rotation.y += ((leg.face > 0 ? -0.34 : 0.34) - rec.group.rotation.y) * 0.12;
+    } else if (rec.leaving) {
+      // Chegou à porta: agora sim sai de cena.
+      removeBot(rec.id, rec);
     }
   }
 

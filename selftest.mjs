@@ -14,6 +14,7 @@ import {
   plateOf, world, levelY, stairSteps, stairFoot, stairHead, STEPS, LEVEL, STAGGER,
   PLATE, GROUND_FLOOR, GROUND_PLATE, WALL_H, STAIR_LANES, stairLaneOffset, stairWell,
   HUE_COUNT, stairLanding, stairMid, stairDoor, inStairWell, BAY_X0, BAY_X1,
+  terrainRect, TERRAIN_MARGIN,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { appendEvent, logPathFor } from './logstore.mjs';
@@ -992,6 +993,26 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   apply(s, evt({ kind: 'spawn', agentId: 'p6', agentType: 'Explore' }));
   const setimo = s.agents.get('p6').hueIndex;
   ok('o sétimo recomeça a paleta', setimo >= 0 && setimo < HUE_COUNT);
+}
+
+// ── o terreno cobre o prédio inteiro ──────────────────────────────────────
+{
+  const s = createScene();
+  apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
+  for (let i = 0; i < ROOMS_PER_FLOOR; i++) apply(s, evt({ kind: 'spawn', agentId: 'sub' + i, agentType: 'Explore' }));
+
+  const t = terrainRect(s);
+  const b = buildingBounds(s);
+  ok('o terreno fica abaixo do térreo', t.y < levelY(GROUND_FLOOR));
+  ok('o terreno cobre a pegada do prédio, com folga',
+     t.x0 <= b.min.x - TERRAIN_MARGIN + 1e-9 && t.x1 >= b.max.x + TERRAIN_MARGIN - 1e-9 &&
+     t.z0 <= b.min.z - TERRAIN_MARGIN + 1e-9 && t.z1 >= b.max.z + TERRAIN_MARGIN - 1e-9);
+  ok('a porta do prédio fica sobre o terreno',
+     DOOR.wx > t.x0 && DOOR.wx < t.x1 && DOOR.wz > t.z0 && DOOR.wz < t.z1);
+  ok('o terreno cresce com o prédio', (() => {
+    const antes = terrainRect(createScene());
+    return (t.x1 - t.x0) >= (antes.x1 - antes.x0);
+  })());
 }
 
 // ── o renderizador ao menos analisa ───────────────────────────────────────

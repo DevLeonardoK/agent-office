@@ -277,6 +277,23 @@ export function inStairWell(p, floor) {
   return lx >= BAY_X0 - 0.8 && lx <= BAY_X1 + 0.8 && lz >= NOTCH_Z - 0.8 && lz <= plateOf(floor).z + 0.8;
 }
 
+/**
+ * O terreno: o chão em que o prédio se apoia, com folga em volta. Sem ele o térreo
+ * flutuava no vazio, e a cena parecia recortada no ar.
+ */
+export const TERRAIN_MARGIN = 6;
+
+export function terrainRect(scene) {
+  const b = buildingBounds(scene);
+  return {
+    x0: b.min.x - TERRAIN_MARGIN,
+    x1: b.max.x + TERRAIN_MARGIN,
+    z0: b.min.z - TERRAIN_MARGIN,
+    z1: b.max.z + TERRAIN_MARGIN,
+    y: levelY(GROUND_FLOOR) - 0.55,
+  };
+}
+
 /** Onde o robô fica parado no cômodo: no meio, um pouco à frente. */
 function roomHome(slot) {
   const r = roomTiles(slot);
