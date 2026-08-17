@@ -154,10 +154,20 @@ posicionamento inteiro em Node.
 são seis, e um andar cheio pode repetir cor — preço aceito para o rosa existir e
 não se confundir com o violeta.
 
+**Balões: no máximo três, e nenhum cobre o outro** (issue #13). O teto está em
+`MAX_BUBBLES`; o quarto empurra o mais antigo, cujo texto já está no registro. A
+colocação é em pixel, no `placeBubbles`: cada balão nasce acima de quem fala, sobe
+até sair de cima de um já posto, e é preso às bordas do palco. A fala é cortada em
+palavra inteira no JS — o `-webkit-line-clamp` punha as reticências na terceira
+linha e ainda pintava a quarta, cortada ao meio. `?stress` faz todos falarem de uma
+vez, que é o caso que o roteiro do demo não produz.
+
 **`?probe` conta robô no ar.** A sonda soma os quadros em que um robô muda de
 altura fora de uma perna de escada e publica em `document.documentElement.dataset.air`
 (`quadros|maior salto`). Serve para provar com número, e não com print, que
-ninguém sobe pelo vazio — no roteiro do demo o valor tem de ser `0|0.000`.
+ninguém sobe pelo vazio — no roteiro do demo o valor tem de ser `0|0.000`. Ele
+também publica `dataset.bubbles`, com balões abertos, pares sobrepostos e quantos
+saíram do quadro: com `?stress`, tem de ser `abertos=3 sobrepostos=0 fora=0`.
 
 **A porta pisa na plataforma do térreo.** Fora dela, quem saía do prédio caminhava
 para o vazio e parecia flutuar numa escada imaginária ao lado do prédio. Há

@@ -399,15 +399,25 @@ select:focus-visible, input:focus-visible {
 .tag3d.plate[data-away] { opacity: .55; border-style: dashed; }
 
 .tag3d.bubble {
-  max-width: 260px;
-  padding: 7px 10px;
+  max-width: 240px;
+  padding: 7px 10px 7px 11px;
   background: var(--plate);
   border: 1px solid var(--rule);
+  /* A borda da esquerda carrega o matiz de quem fala: o balão se move para não
+     cobrir os outros, então a cor é o que mantém o vínculo com o robô. */
+  border-left: 3px solid hsl(var(--h) 55% 55%);
   border-radius: 3px;
   color: var(--text);
   font: 400 var(--t-body)/1.4 var(--sans);
   white-space: normal;
   box-shadow: 0 8px 24px rgb(0 0 0 / .45);
+  /* O corte da fala é feito no JS, não por `-webkit-line-clamp`: com o clamp, o
+     Chrome punha as reticências na terceira linha e ainda pintava a quarta,
+     cortada ao meio. Texto curto por construção não precisa de recorte. */
+  line-height: 1.4;
+}
+.tag3d.bubble[data-main] {
+  border-left-color: hsl(52 85% 58%);
 }
 .tag3d.bubble[data-tone="order"] { border-color: hsl(210 60% 50% / .6); }
 .tag3d.bubble[data-tone="result"] { border-color: hsl(150 45% 45% / .6); }

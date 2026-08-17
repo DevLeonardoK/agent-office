@@ -544,13 +544,28 @@ function clearLabels(kind) {
   }
 }
 
+// No máximo três balões ao mesmo tempo (issue #13). Numa sessão com subagentes
+// todos falam quase juntos, e a tela virava um mural: o quarto balão empurra o mais
+// antigo, cujo texto já está no registro de qualquer forma.
+const MAX_BUBBLES = 3;
+
 function sayBot(id, text, tone) {
   if (STILL || !text) return;   // balão é do agora; o passado fica no registro
   const rec = bots.get(id);
   if (!rec) return;
+
+  const abertos = [...labels.entries()].filter(([, l]) => l.kind === 'bubble' && l.follow !== id);
+  while (abertos.length >= MAX_BUBBLES) dropLabel(abertos.shift()[0]);
+
+  // A fala inteira vive no registro; no balão entra o começo dela, cortado em
+  // palavra inteira. É o que mantém o balão com três linhas no máximo.
+  const curto = text.length > 96 ? text.slice(0, text.lastIndexOf(' ', 96)) + '…' : text;
+
   const p = rec.group.position;
-  const b = labelFor('bubble:' + id, text, p.x, p.y + 2.3, p.z, 'bubble', 5200 + Math.min(text.length * 26, 3200));
+  const b = labelFor('bubble:' + id, curto, p.x, p.y + 2.3, p.z, 'bubble', 5200 + Math.min(text.length * 26, 3200));
   b.node.dataset.tone = tone;
+  b.node.style.setProperty('--h', rec.hue);
+  if (rec.isMain) b.node.dataset.main = '';
   b.follow = id;
 }
 
@@ -714,8 +729,11 @@ function probeAir() {
 }
 
 const v = new THREE.Vector3();
+
 function placeLabels(now) {
   const r = $stage.getBoundingClientRect();
+  const bubbles = [];
+
   for (const [key, rec] of labels) {
     if (rec.until && now > rec.until) { dropLabel(key); continue; }
     if (rec.follow) {
@@ -724,8 +742,73 @@ function placeLabels(now) {
       rec.at.set(bot.group.position.x, bot.group.position.y + 2.3, bot.group.position.z);
     }
     v.copy(rec.at).project(camera);
-    rec.node.style.transform = `translate(-50%, -100%) translate(${(v.x * 0.5 + 0.5) * r.width}px, ${(-v.y * 0.5 + 0.5) * r.height}px)`;
+    const sx = (v.x * 0.5 + 0.5) * r.width;
+    const sy = (-v.y * 0.5 + 0.5) * r.height;
+
+    if (rec.kind === 'bubble') {
+      bubbles.push({ rec, sx, sy });
+      continue;   // balão tem tratamento próprio: precisa caber e não cobrir outro
+    }
+    rec.node.style.transform = `translate(-50%, -100%) translate(${sx}px, ${sy}px)`;
   }
+
+  placeBubbles(bubbles, r);
+}
+
+/**
+ * Coloca os balões sem que um cubra o outro e sem sair do quadro (issue #13).
+ *
+ * O desempate é por posição real na tela, não por ordem de chegada: cada balão
+ * começa acima do robô que fala e, se colidir com um já colocado, sobe até sair de
+ * cima dele. Depois, todo balão é preso às bordas do palco — antes um balão de quem
+ * estava na beirada saía metade para fora.
+ */
+function placeBubbles(list, r) {
+  const M = 10;                 // margem do palco
+  const GAP = 12;               // folga entre balões: colados, liam como um bloco só
+  const postos = [];
+
+  for (const { rec, sx, sy } of list) {
+    const w = rec.node.offsetWidth || 220;
+    const h = rec.node.offsetHeight || 44;
+    let x = sx - w / 2;
+    let y = sy - h - 14;        // acima da cabeça do robô
+
+    // Sai de cima de quem já está posto, subindo — e se não houver espaço acima,
+    // desce para baixo do robô, que é melhor que cobrir a fala do vizinho.
+    for (let i = 0; i < postos.length + 1; i++) {
+      const bate = postos.find((p) => x < p.x + p.w + GAP && x + w + GAP > p.x && y < p.y + p.h + GAP && y + h + GAP > p.y);
+      if (!bate) break;
+      y = bate.y - h - GAP;
+      if (y < M) { y = sy + 18; break; }
+    }
+
+    x = Math.max(M, Math.min(x, r.width - w - M));
+    y = Math.max(M, Math.min(y, r.height - h - M));
+
+    rec.node.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+    postos.push({ x, y, w, h });
+  }
+
+  if (params.has('probe')) probeBubbles(postos, r);
+}
+
+// Sonda dos balões: conta pares sobrepostos e balões fora do quadro. Prova com
+// número que a regra da issue #13 vale, em vez de olhar print.
+let bubbleWorst = 0;
+let bubbleOut = 0;
+function probeBubbles(postos, r) {
+  let over = 0;
+  for (let i = 0; i < postos.length; i++) {
+    for (let j = i + 1; j < postos.length; j++) {
+      const a = postos[i], b = postos[j];
+      if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) over++;
+    }
+    const p = postos[i];
+    if (p.x < 0 || p.y < 0 || p.x + p.w > r.width || p.y + p.h > r.height) bubbleOut++;
+  }
+  bubbleWorst = Math.max(bubbleWorst, over);
+  document.documentElement.dataset.bubbles = `abertos=${postos.length} robos=${bots.size} sobrepostos=${bubbleWorst} fora=${bubbleOut}`;
 }
 
 // ── órbita: arrastar gira, roda aproxima, duplo clique volta ──────────────
@@ -1056,6 +1139,13 @@ if (params.has('demo')) {
   const { playDemo } = await import('./demo.mjs');
   const upto = Number(params.get('upto')) || Infinity;
   await playDemo((ev) => run(apply(scene, ev)), params.has('instant'), upto);
+  // `?stress` faz todo mundo falar de uma vez: é o caso que a issue #13 descreve e
+  // que o roteiro do demo, com as falas espaçadas, nunca produz.
+  if (params.has('stress')) {
+    const texto = 'Fala longa de teste para medir se o balão cabe na tela, se corta em três linhas e se cobre o balão do vizinho quando todos falam ao mesmo tempo.';
+    for (const id of bots.keys()) sayBot(id, texto, 'result');
+  }
+
   // Sinal para o print headless: o roteiro acabou e a cena pode ser fotografada.
   requestAnimationFrame(() => { document.documentElement.dataset.ready = 'true'; });
 } else {
