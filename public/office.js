@@ -14,7 +14,7 @@ const params = new URLSearchParams(location.search);
 
 // Carimbo do desenho carregado. Suba isto quando o desenho mudar de forma —
 // é o que distingue "não mudou" de "o navegador está com o arquivo velho".
-const BUILD = 'isométrico · minimal';
+const BUILD = 'isométrico · trajeto';
 
 // `instant` despeja o roteiro de uma vez; sem cortar as animações, o resultado
 // seria um congelado com todo mundo no meio do caminho.
@@ -45,10 +45,8 @@ const $castCount = el('castCount');
 const $logList = el('logList');
 const $logCount = el('logCount');
 const $empty = el('empty');
-const $floors = el('floors');
 const $app = el('app');
 el('build').textContent = BUILD;
-const $viewBack = el('viewBack');
 
 // ── estado do cliente ─────────────────────────────────────────────────────
 
@@ -197,13 +195,17 @@ function drawBlueprint(floors) {
 // `ride` do trajeto dele tem a mesma duração.
 let $cabin = null;
 let cabinAt = -1;
-const RIDE = { duration: 1.5, ease: [0.4, 0, 0.2, 1] };   // a cabine é lenta, como elevador de verdade
 
-function moveCabin(floor) {
+function moveCabin(floor, instant) {
   if (!$cabin || floor === cabinAt) return;
   cabinAt = floor;
-  const dy = cabinRect(floor).y - cabinRect(-1).y;
-  animate($cabin, { y: dy }, REDUCED ? { duration: 0 } : RIDE);
+  const dy = cabinRect(floor).y - cabinRect(GROUND_FLOOR).y;
+  // A cabine espera a fila do prédio: ela sai quando o robô já embarcou. Uma
+  // cabine que parte antes do passageiro é o tipo de detalhe que faz a cena
+  // parecer quebrada mesmo quando as posições estão certas.
+  const go = () => animate($cabin, { y: dy }, REDUCED || instant ? { duration: 0 } : { duration: RIDE_SECONDS, ease: [0.4, 0, 0.2, 1] });
+  if (instant || REDUCED) { go(); return; }
+  setTimeout(go, 520);
 }
 
 // ── símbolos de planta para cada móvel ────────────────────────────────────
@@ -241,7 +243,8 @@ function mountProp(prop, instant) {
   // x/y/scale e sobrescreveria qualquer translate escrito na mão.
   animate(node, { x: prop.x, y: prop.y }, { duration: 0 });
   // Na reconstrução o móvel já nasce no lugar; ao vivo ele surge com um pop.
-  animate(node, instant ? { opacity: 1, scale: 1 } : { opacity: [0, 1], scale: [0.82, 1] }, instant ? { duration: 0 } : POP);
+  node.style.opacity = '1';
+  if (!instant) animate(node, { scale: [0.82, 1] }, POP);
   return node;
 }
 
@@ -362,11 +365,18 @@ function mountAgent(agent, instant, cmd) {
   // então sem o retrato o robô montaria no destino e a caminhada some.
   const start = cmd && cmd.x != null ? cmd : agent;
   animate(node, { x: start.x, y: start.y }, { duration: 0 });
-  if (!instant) animate(node, { opacity: [0, 1], scale: [0.6, 1] }, POP);
+  // Visível por padrão: a opacidade não pode depender de uma animação começar.
+  // Numa rajada, animações WAAPI ficam pendentes e o robô nunca aparecia — a
+  // planta ficava vazia com o elenco cheio.
+  node.style.opacity = '1';
+  if (!instant) animate(node, { scale: [0.6, 1] }, POP);
   return rec;
 }
 
-function walkAgent(id, x, y, face, elevator, instant, leg) {
+const SPEED = 105;          // pixels por segundo — o passo do robô
+const RIDE_SECONDS = 1.4;   // a cabine é lenta de propósito
+
+function walkAgent(id, x, y, face, kind, instant, start) {
   const rec = nodes.get(id);
   if (!rec) return;
 
@@ -374,35 +384,47 @@ function walkAgent(id, x, y, face, elevator, instant, leg) {
   if (instant) {
     rec.root.dataset.face = String(face);
     rec.chain = Promise.resolve();
+    rec.at = { x, y };
+    rec.root.style.zIndex = String(1000 + Math.round(y));
     animate(rec.root, { x, y }, { duration: 0 });
     return;
   }
 
-  // A viagem de elevador vem em três pernas (entrar na cabine, descer, sair):
-  // elas têm de acontecer uma depois da outra, senão a motion troca o destino
-  // no meio e o robô atravessa a parede em diagonal — que era o que acontecia
-  // antes de o poço existir.
+  // Cada perna do trajeto espera a anterior. Sem a fila, a motion troca o
+  // destino no meio e o robô corta caminho pelo ar — que era exatamente o que
+  // fazia a cena parecer confusa.
   const step = () => {
+    const from = rec.at || { x, y };
+    const dist = Math.hypot(x - from.x, y - from.y);
+    rec.at = { x, y };
     rec.root.dataset.face = String(face);
-    rec.root.classList.toggle('riding', leg === 'ride');
-    if (leg !== 'ride') rec.root.classList.add('walking');
-    // O spring da motion preserva velocidade quando interrompido, então mudar
-    // de destino no meio do caminho não dá solavanco. A descida na cabine é
-    // outra coisa: tempo fixo, igual ao da cabine, para os dois irem juntos.
-    const opts = leg === 'ride' ? (STILL ? { duration: 0 } : RIDE) : WALK;
-      rec.root.style.zIndex = String(1000 + Math.round(y));
+    rec.root.classList.toggle('riding', kind === 'ride');
+    rec.root.classList.toggle('walking', kind === 'walk' || kind === 'off');
+    rec.root.style.zIndex = String(1000 + Math.round(y));
+
+    // Velocidade constante: percurso longo leva mais tempo. É o que faz duas
+    // caminhadas diferentes parecerem o mesmo robô, e não dois ritmos.
+    let opts;
+    if (STILL) opts = { duration: 0 };
+    else if (kind === 'ride') opts = { duration: RIDE_SECONDS, ease: [0.4, 0, 0.2, 1] };
+    else if (kind === 'board' || kind === 'off') opts = { duration: 0.5, ease: [0.3, 0, 0.3, 1] };
+    else opts = { duration: Math.max(0.32, dist / SPEED), ease: [0.35, 0, 0.25, 1] };
+
     const anim = animate(rec.root, { x, y }, opts);
     return anim.finished
       .then(() => { rec.root.classList.remove('walking', 'riding'); })
       .catch(() => {});
   };
 
-  if (!leg) {
+  // Trajeto novo abandona o anterior: a fila guarda as pernas de um caminho só.
+  // Sem isto, uma sessão em rajada acumula minutos de caminhada pendente e o
+  // prédio passa a mostrar onde os agentes estavam, não onde estão.
+  if (start) {
+    rec.gen = (rec.gen || 0) + 1;
     rec.chain = Promise.resolve();
-    step();
-    return;
   }
-  rec.chain = (rec.chain || Promise.resolve()).then(step);
+  const gen = rec.gen || 0;
+  rec.chain = (rec.chain || Promise.resolve()).then(() => (gen === rec.gen ? step() : null));
 }
 
 function stateAgent(agent) {
@@ -560,7 +582,9 @@ function renderLog(ev) {
   while ($logList.children.length > 140) $logList.firstChild.remove();
   $logCount.textContent = ++logged;
   $logList.scrollTop = $logList.scrollHeight;
-  if (!REDUCED) animate(row, { opacity: [0, 1], x: [8, 0] }, { duration: .28 });
+  // A linha entra sem animação: uma WAAPI por linha, numa rajada de eventos,
+  // deixava dezenas de animações pendentes e o registro aparecia em branco.
+  // O registro é texto que rola — o movimento aqui não somava nada.
 }
 
 function clock(at) {
@@ -587,8 +611,8 @@ function run(cmds) {
         mountAgent(c.agent, c.instant, c);
         touchedCast = true;
         break;
-      case 'agent-move': walkAgent(c.id, c.x, c.y, c.face, c.elevator, c.instant, c.leg); break;
-      case 'cabin': moveCabin(c.instant ? c.to : c.to); break;
+      case 'agent-move': walkAgent(c.id, c.x, c.y, c.face, c.kind, c.instant, c.start); break;
+      case 'cabin': moveCabin(c.to, c.instant); break;
       case 'agent-state': stateAgent(c.agent); touchedCast = true; break;
       case 'agent-leave': leaveAgent(c.id, c.instant); touchedCast = true; break;
       case 'say': sayAgent(c.id, c.text, c.tone, c.instant); break;
@@ -660,94 +684,42 @@ $rooms.addEventListener('change', () => {
   switchRoom($rooms.value);
 });
 
-// ── vistas do prédio (issue #11) ──────────────────────────────────────────
-
-// Duas vistas: o corte vertical (padrão), com os andares empilhados e o prédio
-// inteiro na tela, e o andar cheio, para inspecionar um andar denso. Só muda o
-// enquadramento — a planta e os robôs são os mesmos nos dois.
-const view = { mode: 'stack', floor: 0 };
+// ── enquadramento (vista empilhada) ───────────────────────────────────────
+//
+// Uma vista só: o prédio inteiro empilhado na tela. A vista de andar cheio foi
+// removida — com o prédio isométrico ela dava duas leituras do mesmo espaço e
+// confundia mais do que ajudava.
 let drawnFloors = 0;
 
-// `?floor=N` abre um andar em tela cheia assim que ele existir — é o único jeito
-// de o print headless, que não clica, enquadrar a vista de andar cheio.
-let pinned = params.has('floor') ? Number(params.get('floor')) : null;
-
-const viewRect = () => (view.mode === 'floor' ? floorRect(view.floor) : buildingRect(scene));
-
-// Enquadra o retângulo da vista no palco. O `#plan` é uma caixa de 1000×620
-// centrada no palco, e a motion compõe o transform a partir de x/y/scale com
-// origem no centro dela: um ponto p da planta cai em centro + (p - c)·s + (x,y).
-// Daí a conta — levar o centro do retângulo da vista ao centro do palco.
+// Enquadra o prédio no palco. O `#plan` é uma caixa centrada, e a motion compõe
+// o transform a partir de x/y/scale com origem no centro dela: um ponto p cai
+// em centro + (p - c)·s + (x,y). Daí a conta.
 function fit(animated = true) {
   const r = $stage.getBoundingClientRect();
-  const v = viewRect();
-  const pad = 28;
-  const scale = Math.min((r.width - pad * 2) / v.w, (r.height - pad * 2) / v.h, 1.35);
+  const v = buildingRect(scene);
+  const pad = 34;
+  const scale = Math.min((r.width - pad * 2) / v.w, (r.height - pad * 2) / v.h, 1.2);
   const c = { x: PLAN.w / 2, y: PLAN.h / 2 };
   const x = -(v.x + v.w / 2 - c.x) * scale;
   const y = -(v.y + v.h / 2 - c.y) * scale;
-  const opts = REDUCED || !animated ? { duration: 0 } : { type: 'spring', stiffness: 110, damping: 20 };
+  const opts = REDUCED || !animated ? { duration: 0 } : { type: 'spring', stiffness: 60, damping: 18 };
   animate($plan, { x, y, scale }, opts);
 }
 
-function setView(next) {
-  Object.assign(view, next);
-  $stage.dataset.view = view.mode;
-  $viewBack.hidden = view.mode === 'stack';
-  renderFloors();
-  fit();
-}
-
-// As áreas de clique de cada andar. Ficam sobre a planta, invisíveis até o
-// ponteiro passar por cima; no andar cheio sobra uma só, e clicar nela volta
-// para a vista empilhada.
-function renderFloors() {
-  $floors.replaceChildren();
-  const floors = floorCount(scene);
-  for (let f = 0; f < floors; f++) {
-    if (view.mode === 'floor' && f !== view.floor) continue;
-    const fr = floorRect(f);
-    const hit = document.createElement('button');
-    hit.type = 'button';
-    hit.className = 'floor-hit';
-    hit.style.left = fr.x + 'px';
-    hit.style.top = fr.y + 'px';
-    hit.style.width = fr.w + 'px';
-    hit.style.height = fr.h + 'px';
-    const aberto = view.mode === 'floor';
-    hit.title = aberto ? 'voltar à vista empilhada' : `abrir o ${f + 1}º andar em tela cheia`;
-    hit.setAttribute('aria-label', hit.title);
-    hit.addEventListener('click', () => setView(aberto ? { mode: 'stack' } : { mode: 'floor', floor: f }));
-    $floors.appendChild(hit);
-  }
-}
-
 // Mantém a planta desenhada do tamanho do prédio. Chamada depois de cada lote
-// de comandos: é aqui que um andar novo ganha paredes e a vista se reenquadra.
+// de comandos: é aqui que um andar novo ganha plataforma e a vista se reenquadra.
 function syncBuilding() {
   const floors = floorCount(scene);
-  // `?floor=N` só pode ser honrado quando o andar existir: no arranque o prédio
-  // ainda está vazio, e o roteiro do demo é aplicado depois.
-  if (pinned != null && view.mode === 'stack' && floors > pinned) {
-    setView({ mode: 'floor', floor: pinned });
-    pinned = null;
-    return;
-  }
-  if (view.mode === 'floor' && view.floor >= floors) {
-    setView({ mode: 'stack' });   // o andar aberto foi demolido
-    return;
-  }
   if (floors !== drawnFloors) {
     drawnFloors = floors;
     drawBlueprint(floors);
-    // O SVG da planta cobre o prédio inteiro: sem esticar a caixa para cima, o
-    // viewBox cortaria os andares de cima, que vivem em y negativo.
-    const top = floorRect(floors - 1).y - 40;
+    // O SVG cobre o prédio inteiro: sem esticar a caixa para cima, o viewBox
+    // cortaria os andares de cima, que vivem em y negativo.
+    const top = buildingRect(scene).y - 40;
     $blueprint.style.top = top + 'px';
     $blueprint.style.height = PLAN.h - top + 'px';
     $blueprint.setAttribute('viewBox', `0 ${top} ${PLAN.w} ${PLAN.h - top}`);
   }
-  renderFloors();
   fit();
 }
 
@@ -769,11 +741,6 @@ function railSetup(name, btn) {
 }
 railSetup('roster', el('rosterToggle'));
 railSetup('feed', el('feedToggle'));
-
-$viewBack.addEventListener('click', () => setView({ mode: 'stack' }));
-addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && view.mode === 'floor') setView({ mode: 'stack' });
-});
 
 // ── conexão ───────────────────────────────────────────────────────────────
 
@@ -854,7 +821,6 @@ function connect() {
 
 // ── arranque ──────────────────────────────────────────────────────────────
 
-setView({ mode: 'stack' });
 syncBuilding();
 new ResizeObserver(() => fit(false)).observe($stage);
 

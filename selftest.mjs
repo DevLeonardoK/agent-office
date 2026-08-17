@@ -226,7 +226,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
 
   const c = apply(s, evt({ kind: 'spawn', agentId: 'ag-1', agentType: 'Explore' }));
   const enter = cmdsOf(c, 'agent-enter')[0];
-  ok('o filho entra pela porta do cômodo do pai', enter && Math.hypot(enter.x - pai.x, enter.y - pai.y) < 1,
+  ok('o filho nasce ao lado do pai', enter && Math.hypot(enter.x - pai.x, enter.y - pai.y) < 60,
      `enter=(${enter?.x},${enter?.y}) pai=(${pai.x},${pai.y})`);
 
   const move = cmdsOf(c, 'agent-move')[0];
@@ -378,14 +378,14 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('o robô desce ao térreo', onGround(a.x, a.y), `x=${a.x} y=${a.y}`);
   ok('o robô encosta na estação do térreo', Math.abs(a.x - STATIONS.terminal.x) < 60, `x=${a.x}`);
   ok('o cômodo do robô continua reservado', a.room === room);
-  ok('a viagem até a estação é de elevador', cmdsOf(c, 'agent-move').some((m) => m.elevator === true));
+  ok('a viagem até a estação é de elevador', cmdsOf(c, 'agent-move').some((m) => m.kind === 'ride'));
   { const v = invariantsHold(s); ok('invariantes valem com o robô na estação', v.ok, v.detail); }
 
   const back = apply(s, evt({ kind: 'tool_end', agentId: 'a1', agentType: 'Explore', tool: 'Bash' }));
   const a2 = s.agents.get('a1');
   ok('ao terminar, o robô deixa de estar fora', a2.away === false);
   ok('o robô volta para o próprio cômodo', insideRoom(a2.x, a2.y, a2.room));
-  ok('a volta também é de elevador', cmdsOf(back, 'agent-move').some((m) => m.elevator === true));
+  ok('a volta também é de elevador', cmdsOf(back, 'agent-move').some((m) => m.kind === 'ride'));
 }
 
 // ── usar móvel (não estação) continua dentro do cômodo (issue #9) ────────────
@@ -613,15 +613,19 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   ok('o poço vai do último andar até o térreo', sh.y <= roomRect(0).y && sh.y + sh.h >= cabinRect(GROUND_FLOOR).y);
   ok('a cabine cabe dentro do poço', cabinRect(0).x >= sh.x && cabinRect(0).x + cabinRect(0).w <= sh.x + sh.w);
   ok('a cabine do térreo fica abaixo da do 1º andar', cabinRect(GROUND_FLOOR).y > cabinRect(0).y);
-  ok('a cabine nasce no térreo', s.cabinFloor === -1);
+  ok('a cabine subiu para receber quem chegou', s.cabinFloor === 0);
 
   // Usar uma estação vira uma viagem: entrar na cabine, descer, sair.
   const c = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }));
-  const legs = cmdsOf(c, 'agent-move').map((m) => m.leg);
-  ok('a ida é em três pernas pelo poço', legs.join(',') === 'board,ride,off', legs.join(','));
-  const board = cmdsOf(c, 'agent-move')[0];
-  ok('a primeira perna entra na cabine do próprio andar',
+  const kinds = cmdsOf(c, 'agent-move').map((m) => m.kind);
+  ok('a ida passa por embarque, viagem e desembarque',
+     kinds.includes('board') && kinds.includes('ride') && kinds.includes('off'), kinds.join(','));
+  ok('anda até a porta do elevador antes de embarcar', kinds[0] === 'walk', kinds.join(','));
+  const board = cmdsOf(c, 'agent-move').find((m) => m.kind === 'board');
+  ok('o embarque para dentro da cabine do próprio andar',
      Math.abs(board.x - cabinStand(0).x) < 1 && Math.abs(board.y - cabinStand(0).y) < 1);
+  ok('sai da cabine e ainda caminha até a estação',
+     kinds.lastIndexOf('walk') > kinds.indexOf('off'), kinds.join(','));
   ok('a cabine é chamada na viagem', cmdsOf(c, 'cabin').length === 1);
   ok('a cabine desce ao térreo', s.cabinFloor === -1 && cmdsOf(c, 'cabin')[0].to === -1);
   ok('o robô termina na estação', Math.abs(s.agents.get('a1').x - STATIONS.terminal.x) < 60);
@@ -629,7 +633,9 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
 
   // E a volta sobe de novo, pelas mesmas três pernas.
   const back = apply(s, evt({ kind: 'tool_end', agentId: 'a1', agentType: 'Explore', tool: 'Bash' }));
-  ok('a volta também é em três pernas', cmdsOf(back, 'agent-move').map((m) => m.leg).join(',') === 'board,ride,off');
+  const volta = cmdsOf(back, 'agent-move').map((m) => m.kind);
+  ok('a volta também embarca, viaja e desembarca',
+     volta.includes('board') && volta.includes('ride') && volta.includes('off'), volta.join(','));
   ok('a cabine sobe ao andar do robô', s.cabinFloor === 0);
   ok('o robô volta ao próprio cômodo', insideRoom(s.agents.get('a1').x, s.agents.get('a1').y, s.agents.get('a1').room));
 }

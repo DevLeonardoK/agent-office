@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `motion.dev` está vendorizada em
 `public/vendor/motion.js` como bundle fechado.
 
 ```
-node selftest.mjs        # 140 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 142 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -34,6 +34,12 @@ coisa vira aviso de erro no transcript do usuário, a cada ferramenta usada.
 `application/octet-stream` e recusa o módulo — a página fica em branco, sem erro
 visível na aba de rede.
 
+**Nada visível pode depender de uma animação começar.** Animações WAAPI de
+opacidade ficam pendentes numa rajada de eventos, e o que deveria surgir fica
+invisível: robôs sumiam da planta com o elenco cheio, e o registro aparecia em
+branco com o contador em 18. Quem entra na cena nasce com `opacity` no estilo;
+a animação faz só o pop de escala.
+
 **Print headless exige o modo demo.** A página ao vivo mantém o SSE aberto e
 nunca termina de carregar, então o headless trava. E as animações CSS cíclicas
 congelam no primeiro frame, o que faz os bonecos saírem deformados no print —
@@ -54,14 +60,11 @@ o 2º andar assim que ele nascer.
 Antes de perseguir uma deformação vista em print, meça a geometria real com
 `getBoundingClientRect` num `--dump-dom`.
 
-## As duas vistas
+## A vista
 
-O corte vertical (padrão) enquadra `buildingRect(scene)`; o andar cheio
-enquadra `floorRect(n)`. Os dois são geometria pura do `scene.mjs`, com
-asserção no `selftest.mjs` — o `office.js` só converte o retângulo em
-`animate($plan, {x, y, scale})`. Mudou a altura do prédio, `syncBuilding()`
-redesenha a planta inteira e reenquadra; o andar aberto que for demolido
-devolve a vista ao corte vertical.
+Uma só: o prédio empilhado, enquadrado por `buildingRect(scene)`. Havia também
+uma vista de andar cheio; ela foi removida — no prédio isométrico, duas
+leituras do mesmo espaço confundiam mais do que ajudavam.
 
 ## Mapear uma ferramenta nova para um móvel
 
@@ -99,12 +102,24 @@ uma estação sai em três pernas (`leg: board | ride | off`), encadeadas por
 promessa no renderizador: sem o encadeamento a motion troca o destino no meio e
 o robô corta caminho pelo ar.
 
-## Ritmo
+## Trajeto e ritmo
 
-O robô é máquina pesada: `WALK` é um spring frouxo (stiffness 16) e a cabine
-leva 1,5 s. É deliberado — a sessão real dispara ferramentas em rajada, e é a
-lentidão que deixa o olho acompanhar quem foi para onde. Acelerar isto desfaz o
-efeito inteiro.
+Robô não teleporta e não corta caminho pelo ar. O `scene.mjs` devolve um
+**trajeto** — uma perna por comando `agent-move` —, e o `office.js` encadeia as
+pernas por promessa, com **velocidade constante** (`SPEED`, px/s): percurso
+longo leva mais tempo, e duas caminhadas diferentes parecem o mesmo robô.
+
+- Dentro do andar, o caminho é em L: sai do cômodo até o corredor da frente
+  (`LANE`), corre pelo corredor e sobe para o destino.
+- Entre andares, é o elevador: anda até a porta do poço, embarca, viaja com a
+  cabine (`ride`, 1,4 s), desembarca e caminha até o alvo. A cabine parte meio
+  segundo depois do embarque — cabine que sai antes do passageiro faz a cena
+  parecer quebrada mesmo com as posições certas.
+
+**Trajeto novo cancela o anterior.** A primeira perna vem marcada com `start`, e
+o renderizador descarta a fila velha. Sem isso, uma sessão em rajada acumula
+minutos de caminhada pendente e a planta passa a mostrar onde os agentes
+estavam, não onde estão.
 
 ## Invariantes do desenho
 

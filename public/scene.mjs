@@ -49,7 +49,8 @@ export const GROUND_FLOOR = -1;
 export const GROUND_PLATE = { x: PLATE.x + 3, y: PLATE.y + 2 };
 
 // Entrada do prédio: o canto de quem chega de fora, no térreo.
-export const DOOR = iso(-1.4, GROUND_PLATE.y - 1.5, GROUND_FLOOR);
+export const DOOR_TILE = { wx: -1.4, wy: GROUND_PLATE.y - 1.5, floor: GROUND_FLOOR };
+export const DOOR = iso(DOOR_TILE.wx, DOOR_TILE.wy, DOOR_TILE.floor);
 
 // As quatro estações canônicas (CONTEXT.md): recurso singular no prédio
 // inteiro, sempre no térreo. A chave delas é global — um só de cada.
@@ -158,15 +159,53 @@ export function cabinRect(floor) {
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
 
-/** Onde o robô fica em pé dentro da cabine, no andar dado. */
-export function cabinStand(floor) {
-  return iso(SHAFT.wx + SHAFT.w / 2, SHAFT.wy + SHAFT.d / 2 + 0.2, floor);
+/** O ladrilho de dentro da cabine, no andar dado. */
+export function cabinTile(floor) {
+  return { wx: SHAFT.wx + SHAFT.w / 2, wy: SHAFT.wy + SHAFT.d / 2, floor };
 }
 
-/** Onde o robô fica parado no cômodo: no meio, um pouco à frente. */
+/** Onde o robô fica em pé dentro da cabine, em pixel. */
+export function cabinStand(floor) {
+  const t = cabinTile(floor);
+  return iso(t.wx, t.wy, t.floor);
+}
+
+/** Onde o robô fica parado no cômodo, em ladrilhos: no meio, um pouco à frente. */
 function roomHome(slot) {
   const r = roomTiles(slot);
-  return iso(r.wx + r.w / 2, r.wy + r.d * 0.62, r.floor);
+  return { wx: r.wx + r.w / 2, wy: r.wy + r.d * 0.62, floor: r.floor };
+}
+
+// A faixa livre da frente da plataforma. Todo trajeto dentro de um andar passa
+// por ela: é o corredor, e é o que faz o robô contornar em vez de atravessar
+// os cômodos dos outros em linha reta.
+const LANE = PLATE.y - 0.55;
+const GROUND_LANE = GROUND_PLATE.y - 1.2;
+
+/** A porta do elevador num andar: o ladrilho à frente do poço. */
+function shaftDoor(floor) {
+  return { wx: SHAFT.wx + SHAFT.w / 2, wy: SHAFT.wy + SHAFT.d + 0.7, floor };
+}
+
+/**
+ * O caminho de um ponto a outro dentro do mesmo andar, em ladrilhos. Sai do
+ * cômodo até o corredor, corre pelo corredor e sobe para o destino — em L, como
+ * quem anda por um escritório de verdade. Pontos repetidos são descartados.
+ */
+function walkPath(from, to, lane) {
+  const pts = [];
+  const push = (wx, wy) => {
+    const last = pts[pts.length - 1] || from;
+    if (Math.abs(last.wx - wx) > 0.05 || Math.abs(last.wy - wy) > 0.05) pts.push({ wx, wy, floor: to.floor });
+  };
+  const sameLane = Math.abs(from.wy - to.wy) < 0.4;
+  const sameCol = Math.abs(from.wx - to.wx) < 0.4;
+  if (!sameLane && !sameCol) {
+    push(from.wx, lane);        // desce até o corredor
+    push(to.wx, lane);          // corre pelo corredor
+  }
+  push(to.wx, to.wy);           // entra no destino
+  return pts;
 }
 
 /**
@@ -177,20 +216,16 @@ function propSlot(slot, n) {
   const r = roomTiles(slot);
   const col = n % 2;
   const row = Math.floor(n / 2);
-  return iso(
-    r.wx + r.w * (col === 0 ? 0.3 : 0.72),
-    // Preso ao cômodo: com muitos móveis a fileira empilha até a frente e para.
-    Math.min(r.wy + 0.7 + row * 1.15, r.wy + r.d - 0.7),
-    r.floor,
-  );
+  const wx = r.wx + r.w * (col === 0 ? 0.3 : 0.72);
+  // Preso ao cômodo: com muitos móveis a fileira empilha até a frente e para.
+  const wy = Math.min(r.wy + 0.7 + row * 1.15, r.wy + r.d - 0.7);
+  return { wx, wy, floor: r.floor, ...iso(wx, wy, r.floor) };
 }
 
 /** Onde o robô encosta para usar um móvel do próprio cômodo: logo à frente. */
 function standAt(prop, slot) {
   const r = roomTiles(slot);
-  const q = roomQuad(slot);
-  const y = Math.min(prop.y + 34, Math.max(q[2].y, q[3].y) - 8);
-  return { x: prop.x, y };
+  return { wx: prop.wx, wy: Math.min(prop.wy + 0.75, r.wy + r.d - 0.4), floor: r.floor };
 }
 
 // Onde o robô fica em pé no térreo para usar uma estação (issue #9). Ele desce
@@ -199,7 +234,7 @@ function standAt(prop, slot) {
 export function stationStand(station, rank = 0) {
   const side = rank % 2 === 0 ? 1 : -1;
   const spread = Math.ceil(rank / 2) * 1.1;   // um ladrilho inteiro entre dois robôs
-  return iso(station.wx + side * spread, station.wy + 0.9, GROUND_FLOOR);
+  return { wx: station.wx + side * spread, wy: station.wy + 0.9, floor: GROUND_FLOOR };
 }
 
 export function createScene() {
@@ -251,10 +286,9 @@ function relocateAgent(scene, agent, cmds) {
   const dst = firstFreeRoom(taken);
 
   agent.room = dst;
-  const home = roomHome(dst);
-  agent.x = home.x;
-  agent.y = home.y;
-  cmds.push({ op: 'agent-move', id: agent.id, x: home.x, y: home.y, face: agent.face });
+  // Muda de cômodo andando pelo corredor, como qualquer outro trajeto: o salto
+  // instantâneo era o que fazia a realocação parecer teleporte.
+  moveTo(scene, agent, roomHome(dst), cmds);
 
   // Os móveis vão junto: reocupam as mesmas vagas, agora no cômodo novo. Em
   // isométrico não dá para somar um deslocamento — a vaga é que é a verdade.
@@ -264,6 +298,8 @@ function relocateAgent(scene, agent, cmds) {
     const spot = propSlot(dst, n++);
     p.x = spot.x;
     p.y = spot.y;
+    p.wx = spot.wx;
+    p.wy = spot.wy;
     cmds.push({ op: 'prop-move', prop: p });
   }
   agent.deskCursor = n;
@@ -275,7 +311,8 @@ function parentDoor(scene, ev) {
   const parentId = ev.parentId || scene.doorAgent;
   if (!parentId || parentId === ev.agentId) return null;
   const parent = scene.agents.get(parentId);
-  return parent ? { x: parent.x, y: parent.y } : null;
+  if (!parent) return null;
+  return { wx: parent.wx + 0.7, wy: parent.wy, floor: parent.floor };
 }
 
 // ── agentes e móveis ──────────────────────────────────────────────────────
@@ -306,12 +343,16 @@ function ensureAgent(scene, id, type, cmds, entry) {
     }
     a.room = allocRoom(scene, a);
     const home = roomHome(a.room);
-    // Um filho convocado nasce na porta do cômodo do pai (`entry`) e caminha
-    // dali até o próprio cômodo. Sem pai no prédio, entra pela porta do prédio;
-    // o principal já estava dentro e nasce no cômodo dele.
-    const start = entry || (isMain ? home : DOOR);
-    a.x = start.x;
-    a.y = start.y;
+    // Um filho convocado nasce ao lado do pai (`entry`) e caminha dali até o
+    // próprio cômodo. Sem pai no prédio, entra pela porta do térreo e sobe de
+    // elevador; o principal já estava dentro e nasce no cômodo dele.
+    const start = entry || (isMain ? home : DOOR_TILE);
+    a.wx = start.wx;
+    a.wy = start.wy;
+    a.floor = start.floor;
+    const at = iso(a.wx, a.wy, a.floor);
+    a.x = at.x;
+    a.y = at.y;
     scene.agents.set(id, a);
     // Emitido aqui, e não só no spawn: o agente principal nunca dá spawn —
     // ele aparece no primeiro evento que gerar, e sem isto ficava invisível.
@@ -337,7 +378,7 @@ function ensureProp(scene, agent, seed, cmds) {
       pos = { x: station.x, y: station.y, wx: station.wx, wy: station.wy, room: station.label, fixed: true, owner: null };
     } else {
       const s = propSlot(agent.room, agent.deskCursor++);
-      pos = { x: s.x, y: s.y, room: 'CÔMODO', fixed: false, owner: agent.id };
+      pos = { x: s.x, y: s.y, wx: s.wx, wy: s.wy, room: 'CÔMODO', fixed: false, owner: agent.id };
     }
     p = { ...seed, key, ...pos, uses: 0, born: Date.now() };
     scene.props.set(key, p);
@@ -348,11 +389,36 @@ function ensureProp(scene, agent, seed, cmds) {
   return p;
 }
 
-function moveTo(scene, a, x, y, cmds, extra) {
-  if (Math.abs(x - a.x) > 6) a.face = x > a.x ? 1 : -1;
-  a.x = x;
-  a.y = y;
-  cmds.push({ op: 'agent-move', id: a.id, x, y, face: a.face, ...extra });
+/**
+ * Move o robô por um trajeto de ladrilhos e emite um comando por perna. Cada
+ * perna vira uma animação encadeada no renderizador, com duração proporcional à
+ * distância: é isso que faz a cena parecer gente andando em vez de ícone
+ * saltando de um ponto ao outro.
+ */
+function walkAlong(scene, a, points, cmds, kind = 'walk') {
+  // `start` marca a primeira perna de um trajeto novo. O renderizador usa isso
+  // para abandonar o trajeto anterior: numa rajada de ferramentas, a fila de
+  // pernas antigas atrasava o robô em segundos e a cena passava a mostrar um
+  // passado que já não era verdade.
+  let first = !a.pathOpen;
+  a.pathOpen = true;
+  for (const p of points) {
+    const at = iso(p.wx, p.wy, p.floor);
+    if (Math.abs(at.x - a.x) > 6) a.face = at.x > a.x ? 1 : -1;
+    a.wx = p.wx;
+    a.wy = p.wy;
+    a.floor = p.floor;
+    a.x = at.x;
+    a.y = at.y;
+    cmds.push({ op: 'agent-move', id: a.id, x: at.x, y: at.y, face: a.face, kind, start: first });
+    first = false;
+  }
+}
+
+/** Caminhada normal dentro do andar em que o robô já está. */
+function moveTo(scene, a, target, cmds) {
+  const lane = target.floor === GROUND_FLOOR ? GROUND_LANE : LANE;
+  walkAlong(scene, a, walkPath(a, target, lane), cmds);
 }
 
 /**
@@ -361,17 +427,23 @@ function moveTo(scene, a, x, y, cmds, extra) {
  * renderizador encadeia as duas — é isso que faz o elevador ser visível em vez
  * de o robô cortar caminho na diagonal.
  */
-function elevatorTo(scene, a, x, y, cmds, goingDown) {
-  const floor = Math.floor(a.room / ROOMS_PER_FLOOR);
-  const board = cabinStand(goingDown ? floor : -1);
-  const land = cabinStand(goingDown ? -1 : floor);
+function elevatorTo(scene, a, target, cmds) {
+  const from = a.floor ?? Math.floor(a.room / ROOMS_PER_FLOOR);
+  const to = target.floor;
+  const doorHere = shaftDoor(from);
+  const doorThere = shaftDoor(to);
 
-  moveTo(scene, a, board.x, board.y, cmds, { leg: 'board' });
-  scene.cabinFloor = goingDown ? floor : -1;
-  cmds.push({ op: 'cabin', from: scene.cabinFloor, to: goingDown ? -1 : floor });
-  scene.cabinFloor = goingDown ? -1 : floor;
-  moveTo(scene, a, land.x, land.y, cmds, { leg: 'ride', elevator: true });
-  moveTo(scene, a, x, y, cmds, { leg: 'off' });
+  // 1. anda até a porta do elevador do andar em que está
+  walkAlong(scene, a, walkPath(a, doorHere, from === GROUND_FLOOR ? GROUND_LANE : LANE), cmds);
+  // 2. entra na cabine
+  walkAlong(scene, a, [{ ...cabinTile(from) }], cmds, 'board');
+  // 3. desce (ou sobe) junto com a cabine
+  cmds.push({ op: 'cabin', from, to });
+  scene.cabinFloor = to;
+  walkAlong(scene, a, [{ ...cabinTile(to) }], cmds, 'ride');
+  // 4. sai da cabine e anda até o destino
+  walkAlong(scene, a, [doorThere], cmds, 'off');
+  walkAlong(scene, a, walkPath(doorThere, target, to === GROUND_FLOOR ? GROUND_LANE : LANE), cmds);
 }
 
 // Volta o agente ao próprio cômodo, ocioso. De elevador se estava lá embaixo
@@ -384,8 +456,8 @@ function returnHome(scene, a, cmds, status = 'idle') {
   a.away = false;
   a.since = Date.now();
   const home = roomHome(a.room);
-  if (wasAway) elevatorTo(scene, a, home.x, home.y, cmds, false);
-  else moveTo(scene, a, home.x, home.y, cmds);
+  if (wasAway) elevatorTo(scene, a, home, cmds);
+  else moveTo(scene, a, home, cmds);
   cmds.push({ op: 'agent-state', agent: a });
 }
 
@@ -403,6 +475,7 @@ export function apply(scene, ev) {
   if (!KINDS.has(ev.kind)) return [];
 
   const cmds = [];
+  for (const other of scene.agents.values()) other.pathOpen = false;
   // Um filho recém-convocado precisa saber a porta do pai antes de nascer.
   const entry = ev.kind === 'spawn' ? parentDoor(scene, ev) : null;
   const a = ensureAgent(scene, ev.agentId, ev.agentType, cmds, entry);
@@ -412,7 +485,10 @@ export function apply(scene, ev) {
       a.status = 'walking';
       a.since = Date.now();
       const home = roomHome(a.room);
-      moveTo(scene, a, home.x, home.y, cmds);
+      // Quem chega de fora entra pelo térreo e sobe de elevador; quem já estava
+      // no prédio (o principal, ou um filho que sai da porta do pai) só anda.
+      if (a.floor !== home.floor) elevatorTo(scene, a, home, cmds);
+      else moveTo(scene, a, home, cmds);
       break;
     }
 
@@ -430,8 +506,7 @@ export function apply(scene, ev) {
         a.away = false;
         // Quem convoca vira a porta de onde o próximo filho vai sair.
         scene.doorAgent = a.id;
-        const home = roomHome(a.room);
-        moveTo(scene, a, home.x, home.y, cmds);
+        moveTo(scene, a, roomHome(a.room), cmds);
         cmds.push({ op: 'agent-state', agent: a });
         if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'order' });
         break;
@@ -447,11 +522,10 @@ export function apply(scene, ev) {
         const rank = [...scene.agents.values()].filter((o) => o !== a && o.away && o.propKey === p.key).length;
         const spot = stationStand(p, rank);
         a.away = true;
-        elevatorTo(scene, a, spot.x, spot.y, cmds, true);
+        elevatorTo(scene, a, spot, cmds);
       } else {
         a.away = false;
-        const spot = standAt(p, a.room);
-        moveTo(scene, a, spot.x, spot.y, cmds);
+        moveTo(scene, a, standAt(p, a.room), cmds);
       }
       cmds.push({ op: 'prop-hit', prop: p, by: a.id });
       cmds.push({ op: 'agent-state', agent: a });
@@ -469,7 +543,7 @@ export function apply(scene, ev) {
       a.status = 'leaving';
       a.tool = null;
       a.propKey = null;
-      moveTo(scene, a, DOOR.x, DOOR.y, cmds);
+      moveTo(scene, a, DOOR_TILE, cmds);
       if (ev.text) cmds.push({ op: 'say', id: a.id, text: ev.text, tone: 'result' });
       cmds.push({ op: 'agent-leave', id: a.id });
       // O cômodo é esvaziado: os móveis do ocupante somem com ele, para não
