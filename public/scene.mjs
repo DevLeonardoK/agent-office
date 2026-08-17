@@ -20,7 +20,11 @@
 
 export const TILE = 1;                        // uma unidade de mundo = um ladrilho
 export const LEVEL = 5.2;                     // altura de um andar
-export const STAGGER = { x: 3.2, z: -2.6 };   // o escalonamento diagonal por andar
+// O escalonamento por andar. É só em profundidade, de propósito: na tela isso já
+// lê como diagonal, e com deslocamento em x a escada tinha de vencer o desvio
+// lateral além da altura — corria torta, e o vão dela caía sobre o canto
+// chanfrado da plataforma, cortando a borda do prédio.
+export const STAGGER = { x: 0, z: -3.6 };
 export const PLATE = { x: 13, z: 8 };         // os cômodos de um andar
 export const BAY = 4;                         // a baia da escada, à direita dos cômodos
 // Pé-direito desenhado. Baixo de propósito: parede alta, com a câmera inclinada,
@@ -56,13 +60,15 @@ export const plateOf = (floor) => (floor === GROUND_FLOOR ? GROUND_PLATE : { x: 
  */
 export function platformShape(floor) {
   const p = plateOf(floor);
-  const cut = 2.6;
+  const cut = 2.8;
+  // O chanfro fica no canto do fundo à **esquerda**: a baia da escada é à direita,
+  // e chanfrar aquele canto era o que fazia o vão da escada furar a borda.
   return [
-    world(0, 0, floor),
-    world(p.x - cut, 0, floor),
-    world(p.x, cut, floor),
+    world(cut, 0, floor),
+    world(p.x, 0, floor),
     world(p.x, p.z, floor),
     world(0, p.z, floor),
+    world(0, cut, floor),
   ];
 }
 

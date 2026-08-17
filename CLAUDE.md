@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `three.js` e `motion.dev` estão
 vendorizadas em `public/vendor/` como bundles fechados.
 
 ```
-node selftest.mjs        # 217 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 220 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -118,10 +118,16 @@ ele quem resolve toda a geometria; o renderizador recebe pontos prontos e não
 calcula posição nenhuma. É isso que mantém o `selftest.mjs` capaz de exercitar o
 posicionamento inteiro em Node.
 
-- **Andares escalonados em diagonal** (`platformOrigin`): cada plataforma nasce
-  deslocada da de baixo, para nenhuma tapar a outra.
-- **Plataforma pentagonal** (`platformShape`): o retângulo com o canto do fundo
-  chanfrado — é o chanfro que abre lugar para a escada.
+- **Andares escalonados em profundidade** (`platformOrigin`): cada plataforma nasce
+  deslocada da de baixo, o que na tela já lê como diagonal. O escalonamento é só em
+  `z` de propósito: com desvio em `x`, a escada tinha de vencer o desvio lateral
+  além da altura, corria torta, e o vão dela furava a borda chanfrada.
+- **Plataforma pentagonal** (`platformShape`): o retângulo com o canto do fundo à
+  **esquerda** chanfrado. À direita fica a baia da escada — chanfrar aquele canto
+  era o que deixava a abertura da escada cortada.
+- **Vão da escada** (`stairWell`): buraco retângulo na laje, alinhado ao lance, com
+  guarda-corpo em três lados. Há asserção de que ele cabe inteiro na plataforma e
+  não invade cômodo.
 - **Escada, não elevador** (`stairFoot`, `stairHead`, `stairSteps`): a viagem
   entre andares é uma sequência de degraus, um comando `agent-move` por degrau.
 - **Texto é DOM**, numa camada sobre o canvas, reposicionado por quadro a partir

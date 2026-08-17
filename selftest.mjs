@@ -709,19 +709,22 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
 
   // Cada plataforma é um pentágono: o retângulo com o canto do fundo chanfrado.
   ok('a plataforma é um pentágono', platformShape(0).length === 5);
-  ok('o chanfro está no canto do fundo à direita', (() => {
+  ok('o chanfro está no canto do fundo à esquerda', (() => {
     const p = platformShape(0);
     const o = platformOrigin(0);
-    const plate = plateOf(0);
-    // o segundo e o terceiro vértice formam o corte, entre o topo e a lateral
-    return p[1].wx - o.x < plate.x && p[2].wz - o.z > 0 && p[2].wx - o.x === plate.x;
+    // o primeiro vértice entra em x, o último desce em z: o canto (0,0) foi cortado
+    return p[0].wx - o.x > 0 && p[0].wz - o.z === 0 && p[4].wx - o.x === 0 && p[4].wz - o.z > 0;
   })());
 
   // Escalonamento diagonal: o andar de cima nasce deslocado, e mais alto.
   const o0 = platformOrigin(0);
   const o1 = platformOrigin(1);
-  ok('o andar de cima é deslocado na diagonal', o1.x !== o0.x && o1.z !== o0.z);
+  ok('o andar de cima é deslocado em profundidade', o1.z !== o0.z);
   ok('o deslocamento é o mesmo em todo andar', o1.x - o0.x === STAGGER.x && o1.z - o0.z === STAGGER.z);
+  // Sem desvio lateral, a escada corre reta e o vão dela é um retângulo alinhado —
+  // era o desvio em x que fazia o vão furar a borda chanfrada da plataforma.
+  ok('o escalonamento não desloca para o lado', STAGGER.x === 0);
+  ok('o lance corre reto', Math.abs(stairFoot(0).wx - stairHead(0).wx) < 1e-9);
   ok('o andar de cima fica mais alto', levelY(1) - levelY(0) === LEVEL);
   ok('o térreo fica abaixo do 1º andar', levelY(GROUND_FLOOR) < levelY(0));
   ok('o térreo é a plataforma maior', plateOf(GROUND_FLOOR).z > plateOf(0).z);
@@ -735,7 +738,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const b2 = buildingBounds(s);
   ok('o prédio tem dois andares', floorCount(s) === 2);
   ok('a caixa sobe com o andar novo', b2.max.y > b1.max.y);
-  ok('a caixa acompanha o deslocamento diagonal', b2.max.x > b1.max.x || b2.min.z < b1.min.z);
+  ok('a caixa acompanha o escalonamento', b2.min.z < b1.min.z);
   ok('todo robô cabe na caixa do prédio', [...s.agents.values()].every(
     (a) => a.wx >= b2.min.x - 2 && a.wx <= b2.max.x + 2 && a.wy >= b2.min.y - 1 && a.wy <= b2.max.y + 1));
   { const v = invariantsHold(s); ok('invariantes valem no prédio de dois andares', v.ok, v.detail); }
@@ -900,6 +903,12 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const altos = steps.filter((st) => st.wy > levelY(0) - 1.6);
   ok('o vão cobre os últimos degraus', altos.length > 0 && altos.every((st) => inside(well, st.wx, st.wz)),
      `${altos.filter((st) => !inside(well, st.wx, st.wz)).length} degraus tapados`);
+
+  // O vão inteiro cabe na plataforma: um canto de fora recortava a borda do prédio
+  // e a abertura aparecia cortada.
+  const outline = platformShape(0);
+  ok('o vão está inteiro dentro da plataforma', well.every((p) => inside(outline, p.wx, p.wz)),
+     `${well.filter((p) => !inside(outline, p.wx, p.wz)).length} cantos fora`);
 
   // E não é um buraco no meio do cômodo: fica na baia, fora dos cinco cômodos.
   for (let i = 0; i < ROOMS_PER_FLOOR; i++) {

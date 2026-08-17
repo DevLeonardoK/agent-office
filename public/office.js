@@ -112,6 +112,7 @@ const mat = {
   // A divisória é baixa e mais clara que a parede: alta e escura, ela se
   // confundia com móvel e o cômodo virava um corredor de barras.
   divider: new THREE.MeshLambertMaterial({ color: 0x2d4d6d }),
+  rail: new THREE.MeshLambertMaterial({ color: 0x4a7ba6 }),
   line: new THREE.LineBasicMaterial({ color: 0x3d6c93, transparent: true, opacity: 0.42 }),
   edge: new THREE.LineBasicMaterial({ color: 0x5d93bc, transparent: true, opacity: 0.9 }),
   step: new THREE.MeshLambertMaterial({ color: 0x1b3048 }),
@@ -177,9 +178,46 @@ function drawPlatform(floor) {
   for (let i = 1; i < p.x; i++) g.add(outline([world(i, 0, floor), world(i, p.z, floor)], mat.line, y + 0.04));
   for (let j = 1; j < p.z; j++) g.add(outline([world(0, j, floor), world(p.x, j, floor)], mat.line, y + 0.04));
 
-  // Paredes do fundo e da esquerda; a frente fica aberta para a câmera entrar.
-  g.add(put(box(p.x, WALL_H, 0.2, mat.wall), o.x + p.x / 2, y + WALL_H / 2, o.z - 0.1));
-  g.add(put(box(0.2, WALL_H, p.z, mat.wall), o.x - 0.1, y + WALL_H / 2, o.z + p.z / 2));
+  // Guarda-corpo do vão da escada: três lados, deixando a boca livre para quem
+  // desembarca. É o que faz o buraco parecer um vão de escada, e não um pedaço de
+  // laje que faltou.
+  if (floor > GROUND_FLOOR) {
+    const well = stairWell(floor);
+    const xs = well.map((pt) => pt.wx);
+    const zs = well.map((pt) => pt.wz);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs);
+    const z0 = Math.min(...zs), z1 = Math.max(...zs);
+    const H = 0.62;
+    const railY = y + H / 2;
+    // as duas laterais, ao longo do lance
+    g.add(put(box(0.1, H, z1 - z0, mat.rail), x0, railY, (z0 + z1) / 2));
+    g.add(put(box(0.1, H, z1 - z0, mat.rail), x1, railY, (z0 + z1) / 2));
+    // e o fundo, atrás de quem sobe: a boca (lado do desembarque) fica aberta
+    g.add(put(box(x1 - x0 + 0.1, H, 0.1, mat.rail), (x0 + x1) / 2, railY, z1));
+    // fio de arremate no contorno do vão
+    g.add(outline([
+      { wx: x0, wz: z0 }, { wx: x1, wz: z0 }, { wx: x1, wz: z1 }, { wx: x0, wz: z1 }, { wx: x0, wz: z0 },
+    ], mat.edge, y + 0.06));
+  }
+
+  // Paredes do fundo e da esquerda; a frente fica aberta para a câmera entrar. Elas
+  // começam depois do chanfro: indo até a quina, sobravam no vazio.
+  const cut = 2.8;
+  const backW = p.x - cut;
+  g.add(put(box(backW, WALL_H, 0.2, mat.wall), o.x + cut + backW / 2, y + WALL_H / 2, o.z - 0.1));
+  const leftD = p.z - cut;
+  g.add(put(box(0.2, WALL_H, leftD, mat.wall), o.x - 0.1, y + WALL_H / 2, o.z + cut + leftD / 2));
+  // e a parede curta do próprio chanfro, fechando o canto
+  const diag = box(0.2, WALL_H, Math.hypot(cut, cut), mat.wall);
+  diag.position.set(o.x + cut / 2, y + WALL_H / 2, o.z + cut / 2);
+  diag.rotation.y = -Math.PI / 4;
+  g.add(diag);
+
+  // Arremate no topo das paredes: o fio que dá o acabamento de maquete.
+  g.add(outline([
+    { wx: o.x, wz: o.z + p.z }, { wx: o.x, wz: o.z + cut },
+    { wx: o.x + cut, wz: o.z }, { wx: o.x + p.x, wz: o.z },
+  ], mat.edge, y + WALL_H));
 
   return g;
 }
