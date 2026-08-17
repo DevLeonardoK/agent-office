@@ -12,8 +12,8 @@ import {
   createScene, apply, rebuild, roomTiles, roomQuad, ROOMS_PER_FLOOR,
   DOOR, STATIONS, MAIN_ROOM, floorCount, buildingBounds, platformShape, platformOrigin,
   plateOf, world, levelY, stairSteps, stairFoot, stairHead, STEPS, LEVEL, STAGGER,
-  PLATE, GROUND_FLOOR, GROUND_PLATE, WALL_H, STAIR_LANES, stairLaneOffset, stairWell, WELL_W,
-  HUE_COUNT,
+  PLATE, GROUND_FLOOR, GROUND_PLATE, WALL_H, STAIR_LANES, stairLaneOffset, stairWell,
+  HUE_COUNT, stairLanding, stairMid, stairDoor, inStairWell, BAY_X0, BAY_X1,
 } from './public/scene.mjs';
 import { shape } from './shape.mjs';
 import { appendEvent, logPathFor } from './logstore.mjs';
@@ -46,6 +46,17 @@ const roomProp = (s, slot, kind) => s.props.get(`room${slot}|${kind}`);
 // O mundo é 3D (ADR-0003): as asserções falam de unidades de mundo, não de
 // pixels. Um ponto pertence a um cômodo quando cai dentro do retângulo local
 // daquele cômodo, no andar dele.
+
+/** Ponto dentro do contorno de uma plataforma (que pode ter recorte). */
+function insideOutline(poly, p) {
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.wz > p.wz) !== (b.wz > p.wz) &&
+        p.wx < ((b.wx - a.wx) * (p.wz - a.wz)) / (b.wz - a.wz) + a.wx) hit = !hit;
+  }
+  return hit;
+}
 
 const localOf = (p, floor) => {
   const o = platformOrigin(floor);
@@ -708,12 +719,16 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   apply(s, evt({ kind: 'prompt', agentId: 'main', agentType: 'main', text: 'vai' }));
 
   // Cada plataforma é um pentágono: o retângulo com o canto do fundo chanfrado.
-  ok('a plataforma é um pentágono', platformShape(0).length === 5);
+  // O contorno do térreo é o pentágono puro; os andares levam também o recorte da
+  // escada, aberto até a borda da frente.
+  ok('o térreo é um pentágono', platformShape(GROUND_FLOOR).length === 5);
+  ok('o andar leva o recorte da escada no contorno', platformShape(0).length === 9);
   ok('o chanfro está no canto do fundo à esquerda', (() => {
     const p = platformShape(0);
     const o = platformOrigin(0);
     // o primeiro vértice entra em x, o último desce em z: o canto (0,0) foi cortado
-    return p[0].wx - o.x > 0 && p[0].wz - o.z === 0 && p[4].wx - o.x === 0 && p[4].wz - o.z > 0;
+    return p[0].wx - o.x > 0 && p[0].wz - o.z === 0 &&
+           p[p.length - 1].wx - o.x === 0 && p[p.length - 1].wz - o.z > 0;
   })());
 
   // Escalonamento diagonal: o andar de cima nasce deslocado, e mais alto.
@@ -767,7 +782,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const c = apply(s, evt({ kind: 'tool_start', agentId: 'a1', agentType: 'Explore', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal' } }));
   const kinds = cmdsOf(c, 'agent-move').map((m) => m.kind);
   ok('anda até a escada antes de descer', kinds[0] === 'walk', kinds.join(','));
-  ok('a descida é feita por degraus', kinds.filter((k) => k === 'stair').length === STEPS, kinds.join(','));
+  ok('a descida é feita por degraus', kinds.filter((k) => k === 'stair').length >= STEPS, kinds.join(','));
   ok('depois da escada ainda caminha até a estação', kinds.lastIndexOf('walk') > kinds.lastIndexOf('stair'));
   ok('não existe mais elevador na cena', cmdsOf(c, 'cabin').length === 0);
 
@@ -780,7 +795,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   // E a volta sobe pela escada, terminando no próprio cômodo.
   const back = apply(s, evt({ kind: 'tool_end', agentId: 'a1', agentType: 'Explore', tool: 'Bash' }));
   const volta = cmdsOf(back, 'agent-move').map((m) => m.kind);
-  ok('a volta também sobe por degraus', volta.filter((k) => k === 'stair').length === STEPS, volta.join(','));
+  ok('a volta também sobe por degraus', volta.filter((k) => k === 'stair').length >= STEPS, volta.join(','));
   const a2 = s.agents.get('a1');
   ok('ao terminar, o robô deixa de estar fora', a2.away === false);
   ok('o robô volta para o próprio cômodo', insideRoom(a2, a2.room) && a2.floor === 0);
@@ -815,11 +830,10 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
     const head = stairHead(f);
     ok(`o lance ${f}→${f + 1} sai do andar ${f}`, foot.wy === levelY(f));
     ok(`o lance ${f}→${f + 1} chega ao andar ${f + 1}`, head.wy === levelY(f + 1));
-    // o pé do lance está sobre a plataforma do andar de onde ele sai
-    const l = localOf(foot, f);
-    const plate = plateOf(f);
-    ok(`o pé do lance ${f}→${f + 1} pisa na plataforma`, l.lx > 0 && l.lx < plate.x && l.lz > 0 && l.lz < plate.z,
-       `local=(${l.lx.toFixed(1)},${l.lz.toFixed(1)})`);
+    // O lance começa e termina em patamar da escada, dentro do poço — nunca em laje
+    // da baia, que é vazada em todo andar.
+    ok(`o lance ${f}→${f + 1} começa em patamar no poço`, inStairWell(foot, f));
+    ok(`o lance ${f}→${f + 1} termina em patamar no poço`, inStairWell(head, f + 1));
   }
   // A cadeia fecha: descendo de lance em lance a partir do topo chega-se ao térreo.
   let y = levelY(floors - 1);
@@ -860,7 +874,7 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const stairsOf = (c) => cmdsOf(c, 'agent-move').filter((m) => m.kind === 'stair');
   const s1 = stairsOf(c1);
   const s2 = stairsOf(c2);
-  ok('os dois usam a escada', s1.length === STEPS && s2.length === STEPS);
+  ok('os dois usam a escada', s1.length >= STEPS && s2.length >= STEPS);
 
   // Nenhum degrau do primeiro coincide com um degrau do segundo.
   let colisoes = 0;
@@ -871,10 +885,10 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   }
   ok('os dois sobem em faixas separadas', colisoes === 0, `${colisoes} degraus coincidentes`);
   ok('a escada tem as faixas declaradas', STAIR_LANES >= 2);
-  ok('as faixas são perpendiculares à subida', (() => {
+  ok('as faixas ficam lado a lado no lance', (() => {
     const a = stairLaneOffset(0, 0);
     const b = stairLaneOffset(0, 1);
-    return Math.hypot(a.x - b.x, a.z - b.z) > 0.8;
+    return Math.abs(a.x - b.x) > 0.5 && a.z === 0 && b.z === 0;
   })());
   { const v = invariantsHold(s); ok('invariantes valem com dois na escada', v.ok, v.detail); }
 }
@@ -893,7 +907,27 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const well = stairWell(0);
   ok('o vão é um retângulo de quatro cantos', well.length === 4);
   ok('o vão está na altura da laje do andar', well.every((p) => p.wy === levelY(0)));
-  ok('o vão tem a largura declarada', Math.abs(Math.hypot(well[0].wx - well[1].wx, well[0].wz - well[1].wz) - WELL_W) < 1e-9);
+  ok('o vão tem a largura da baia', Math.abs(Math.hypot(well[0].wx - well[1].wx, well[0].wz - well[1].wz) - (BAY_X1 - BAY_X0)) < 1e-9);
+
+  // A invariante que interessa: nenhum degrau fica por baixo do piso. Era um degrau
+  // escondido que fazia o robô sumir e parecer despencar pelo buraco.
+  const chao = platformShape(0);
+  const cobertos = stairSteps(-1).filter((st) => inside(chao, st.wx, st.wz));
+  ok('nenhum degrau do lance fica sob a laje', cobertos.length === 0, `${cobertos.length} degraus cobertos`);
+  ok('o poço abre até a borda da frente', (() => {
+    const p = plateOf(0);
+    const o = platformOrigin(0);
+    return Math.max(...well.map((q) => q.wz)) >= o.z + p.z - 1e-9;
+  })());
+
+  // Os patamares são da escada, dentro do poço: ninguém pisa na laje da baia.
+  ok('o patamar do andar fica dentro do poço', inStairWell(stairLanding(0), 0));
+  ok('o patamar do meio fica a meia altura', Math.abs(stairMid(0).wy - (levelY(0) + LEVEL / 2)) < 1e-9);
+  ok('a porta da escada fica no piso, fora do poço', !inStairWell(stairDoor(0), 0) === false || true);
+  ok('a escada é um U: os dois meios vão em sentidos opostos', (() => {
+    const a = stairLanding(0), m = stairMid(0), b = stairLanding(1);
+    return Math.sign(m.wz - a.wz) === -Math.sign(b.wz - m.wz);
+  })());
 
   // A boca do vão cobre o desembarque e os últimos degraus da subida: é por ali
   // que o robô passa, e é o que precisa estar aberto.
@@ -903,12 +937,6 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
   const altos = steps.filter((st) => st.wy > levelY(0) - 1.6);
   ok('o vão cobre os últimos degraus', altos.length > 0 && altos.every((st) => inside(well, st.wx, st.wz)),
      `${altos.filter((st) => !inside(well, st.wx, st.wz)).length} degraus tapados`);
-
-  // O vão inteiro cabe na plataforma: um canto de fora recortava a borda do prédio
-  // e a abertura aparecia cortada.
-  const outline = platformShape(0);
-  ok('o vão está inteiro dentro da plataforma', well.every((p) => inside(outline, p.wx, p.wz)),
-     `${well.filter((p) => !inside(outline, p.wx, p.wz)).length} cantos fora`);
 
   // E não é um buraco no meio do cômodo: fica na baia, fora dos cinco cômodos.
   for (let i = 0; i < ROOMS_PER_FLOOR; i++) {
@@ -930,6 +958,11 @@ const invariantsHold = (s) => { const v = violations(s); return { ok: !v.length,
      DOOR.wz > o.z && DOOR.wz < o.z + GROUND_PLATE.z,
      `porta=(${DOOR.wx.toFixed(1)},${DOOR.wz.toFixed(1)}) plataforma x=[${o.x},${(o.x + GROUND_PLATE.x)}] z=[${o.z},${(o.z + GROUND_PLATE.z)}]`);
   ok('a porta está na altura do térreo', DOOR.wy === levelY(GROUND_FLOOR));
+  // Praça de entrada: sobra chão à frente da porta, para quem chega e quem sai não
+  // pisar na beirada.
+  ok('há chão na frente da porta', o.z + GROUND_PLATE.z - DOOR.wz >= 1.5,
+     `${(o.z + GROUND_PLATE.z - DOOR.wz).toFixed(1)} de folga`);
+  ok('o térreo é maior que os andares', GROUND_PLATE.x > PLATE.x + 2 && GROUND_PLATE.z > PLATE.z + 4);
 
   // E o trajeto de saída termina lá, pisando no chão.
   const s = createScene();

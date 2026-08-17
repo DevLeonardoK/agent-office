@@ -5,7 +5,7 @@ navegador. Node puro, sem `npm install` — `three.js` e `motion.dev` estão
 vendorizadas em `public/vendor/` como bundles fechados.
 
 ```
-node selftest.mjs        # 220 verificações: scene.mjs, os hooks e a sintaxe do renderizador
+node selftest.mjs        # 230 verificações: scene.mjs, os hooks e a sintaxe do renderizador
 node simulate.mjs        # encena uma sessão pelo POST /hook, como o Claude Code faz
 node ensure-server.mjs   # sobe o servidor se estiver fora do ar (idempotente)
 ```
@@ -125,9 +125,16 @@ posicionamento inteiro em Node.
 - **Plataforma pentagonal** (`platformShape`): o retângulo com o canto do fundo à
   **esquerda** chanfrado. À direita fica a baia da escada — chanfrar aquele canto
   era o que deixava a abertura da escada cortada.
-- **Vão da escada** (`stairWell`): buraco retângulo na laje, alinhado ao lance, com
-  guarda-corpo em três lados. Há asserção de que ele cabe inteiro na plataforma e
-  não invade cômodo.
+- **Escada em U dentro de um poço.** A baia à direita dos cômodos é vazada em todo
+  andar (`stairWell`, recorte no contorno) e a escada tem os patamares dela: o do
+  andar, na boca do poço, e o do meio, a meia altura no fundo. Duas tentativas
+  anteriores falharam e o motivo está no `scene.mjs`: um lance reto não vence a
+  altura dentro da baia, e com laje na baia o pé do lance seguinte caía no vão
+  aberto pelo lance anterior — o desenho repete a cada andar. Com poço, ninguém
+  pisa em laje ali: entra pelo corredor, pisa no patamar, sobe meio lance, patamar
+  do meio, outro meio lance. Descer é o mesmo caminho invertido, pelo mesmo lado.
+- **O térreo é maior que os andares**, para caber a praça de entrada com chão à
+  frente da porta.
 - **Escada, não elevador** (`stairFoot`, `stairHead`, `stairSteps`): a viagem
   entre andares é uma sequência de degraus, um comando `agent-move` por degrau.
 - **Texto é DOM**, numa camada sobre o canvas, reposicionado por quadro a partir

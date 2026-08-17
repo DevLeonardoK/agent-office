@@ -9,7 +9,8 @@ import * as THREE from './vendor/three.js';
 import {
   createScene, apply, rebuild, floorCount, buildingBounds, platformShape, plateOf,
   roomQuad, world, platformOrigin, levelY, ROOMS_PER_FLOOR, PLATE,
-  WALL_H, GROUND_FLOOR, STATIONS, DOOR, stairSteps, stairFoot, stairHead, stairWell, HUE_COUNT,
+  WALL_H, GROUND_FLOOR, STATIONS, DOOR, stairSteps, stairWell, HUE_COUNT,
+  stairLanding, stairMid, stairDoor, LEVEL,
 } from './scene.mjs';
 
 const params = new URLSearchParams(location.search);
@@ -113,6 +114,7 @@ const mat = {
   // confundia com móvel e o cômodo virava um corredor de barras.
   divider: new THREE.MeshLambertMaterial({ color: 0x2d4d6d }),
   rail: new THREE.MeshLambertMaterial({ color: 0x4a7ba6 }),
+  landing: new THREE.MeshLambertMaterial({ color: 0x2b4a68 }),
   line: new THREE.LineBasicMaterial({ color: 0x3d6c93, transparent: true, opacity: 0.42 }),
   edge: new THREE.LineBasicMaterial({ color: 0x5d93bc, transparent: true, opacity: 0.9 }),
   step: new THREE.MeshLambertMaterial({ color: 0x1b3048 }),
@@ -130,7 +132,7 @@ three.add(building);
 
 // ── desenho do prédio ─────────────────────────────────────────────────────
 
-const STAIR_W = 3.0;   // largura do lance: cabem duas faixas de robô
+const STAIR_W = 2.6;   // largura do lance: cabem duas faixas de robô
 
 const box = (w, h, d, material) => new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
 
@@ -192,8 +194,8 @@ function drawPlatform(floor) {
     // as duas laterais, ao longo do lance
     g.add(put(box(0.1, H, z1 - z0, mat.rail), x0, railY, (z0 + z1) / 2));
     g.add(put(box(0.1, H, z1 - z0, mat.rail), x1, railY, (z0 + z1) / 2));
-    // e o fundo, atrás de quem sobe: a boca (lado do desembarque) fica aberta
-    g.add(put(box(x1 - x0 + 0.1, H, 0.1, mat.rail), (x0 + x1) / 2, railY, z1));
+    // e o fundo do poço; a boca, no lado do corredor, fica aberta para entrar
+    g.add(put(box(x1 - x0 + 0.1, H, 0.1, mat.rail), (x0 + x1) / 2, railY, z0));
     // fio de arremate no contorno do vão
     g.add(outline([
       { wx: x0, wz: z0 }, { wx: x1, wz: z0 }, { wx: x1, wz: z1 }, { wx: x0, wz: z1 }, { wx: x0, wz: z0 },
@@ -234,51 +236,36 @@ function drawPartitions(floor) {
 }
 
 /**
- * O lance que liga `floor` ao andar de cima: uma caixa por degrau, mais as duas
- * laterais e o patamar de desembarque. Sem as laterais os degraus flutuavam soltos
- * e a subida parecia acontecer onde não havia escada.
+ * A escada em U de um vão: os dois meios-lances, o patamar do meio e o patamar do
+ * andar de onde ela sai. Os degraus são blocos cheios; os patamares, lajes próprias
+ * dentro do poço — é isso que faz o robô nunca pisar na laje da baia.
  */
 function drawStairs(floor) {
   const g = new THREE.Group();
-  const foot = stairFoot(floor);
-  const head = stairHead(floor);
-  const dx = head.wx - foot.wx;
-  const dz = head.wz - foot.wz;
-  const runTotal = Math.hypot(dx, dz);
-  const yaw = Math.atan2(dx, dz);
-  const width = STAIR_W;
+  const landing = stairLanding(floor);
+  const mid = stairMid(floor);
 
-  let prev = foot;
-  for (const st of stairSteps(floor)) {
-    const h = st.wy - prev.wy;
-    const run = Math.hypot(st.wx - prev.wx, st.wz - prev.wz);
-    // O degrau é um bloco cheio até o piso do degrau anterior: escada de
-    // concreto, não tábua no ar.
-    const rise = Math.max(0.22, h);
-    const step = box(width, rise, run + 0.06, mat.step);
-    step.position.set((st.wx + prev.wx) / 2, st.wy - rise / 2, (st.wz + prev.wz) / 2);
-    step.rotation.y = yaw;
+  // Patamares: lajes próprias da escada, dentro do poço. O do andar, na boca, é por
+  // onde se entra e se sai; o do meio fica no fundo, a meia altura.
+  g.add(put(box(STAIR_W + 1.0, 0.3, 1.8, mat.landing), landing.wx, landing.wy - 0.15, landing.wz));
+  g.add(put(box(STAIR_W + 1.0, 0.3, 1.8, mat.landing), mid.wx, mid.wy - 0.15, mid.wz));
+
+  // Os degraus, em dois meios: cada bloco vai do degrau anterior até o seu.
+  const steps = stairSteps(floor);
+  let prev = { ...landing, wx: steps[0].wx };
+  for (const st of steps) {
+    const rise = Math.max(0.16, Math.abs(st.wy - prev.wy));
+    const run = Math.max(0.35, Math.hypot(st.wx - prev.wx, st.wz - prev.wz));
+    const step = box(2.4, rise, run + 0.08, mat.step);
+    step.position.set((st.wx + prev.wx) / 2, Math.max(st.wy, prev.wy) - rise / 2, (st.wz + prev.wz) / 2);
+    step.rotation.y = Math.atan2(st.wx - prev.wx, st.wz - prev.wz);
     g.add(step);
     prev = st;
   }
 
-  // As duas laterais, seguindo a inclinação do lance.
-  const pitch = -Math.atan2(head.wy - foot.wy, runTotal);
-  for (const side of [-1, 1]) {
-    const rail = box(0.18, 0.5, runTotal, mat.slab);
-    const off = new THREE.Vector3(Math.cos(yaw) * side * (width / 2), 0, -Math.sin(yaw) * side * (width / 2));
-    rail.position.set((foot.wx + head.wx) / 2 + off.x, (foot.wy + head.wy) / 2 + 0.3, (foot.wz + head.wz) / 2 + off.z);
-    rail.rotation.set(pitch, yaw, 0, 'YXZ');
-    rail.rotation.y = yaw;
-    rail.rotation.x = pitch;
-    g.add(rail);
-  }
-
-  // Patamar no topo: onde o robô desembarca antes de andar pelo corredor.
-  const land = box(width + 0.4, 0.3, 1.6, mat.step);
-  land.position.set(head.wx, head.wy - 0.15, head.wz);
-  land.rotation.y = yaw;
-  g.add(land);
+  // Sem guarda-corpo no lance: barras inclinadas soltas no ar liam como vigas
+  // atravessando a cena. O guarda-corpo fica só na boca do poço, onde ele tem
+  // função de leitura — dizer que ali o piso termina.
 
   return g;
 }

@@ -19,14 +19,21 @@
 // se escalonam em diagonal, de modo que nenhuma tape a de baixo.
 
 export const TILE = 1;                        // uma unidade de mundo = um ladrilho
-export const LEVEL = 5.2;                     // altura de um andar
+// Altura de um andar. Casada com a profundidade da plataforma e o escalonamento:
+// é o trio que define a inclinação do lance. Pé-direito alto com plataforma curta
+// dá escada de 60°, ou joga o pé do lance fora do piso.
+export const LEVEL = 4.2;
 // O escalonamento por andar. É só em profundidade, de propósito: na tela isso já
 // lê como diagonal, e com deslocamento em x a escada tinha de vencer o desvio
 // lateral além da altura — corria torta, e o vão dela caía sobre o canto
 // chanfrado da plataforma, cortando a borda do prédio.
-export const STAGGER = { x: 0, z: -3.6 };
-export const PLATE = { x: 13, z: 8 };         // os cômodos de um andar
+export const STAGGER = { x: 0, z: -2.6 };
+export const PLATE = { x: 13, z: 10 };        // os cômodos de um andar
 export const BAY = 4;                         // a baia da escada, à direita dos cômodos
+
+// A baia em coordenadas locais: é a faixa em x onde o poço da escada é vazado.
+export const BAY_X0 = PLATE.x + 0.2;
+export const BAY_X1 = PLATE.x + BAY - 0.2;
 // Pé-direito desenhado. Baixo de propósito: parede alta, com a câmera inclinada,
 // projeta sobre o piso e tapa o cômodo — o andar virava uma faixa preta.
 export const WALL_H = 1.9;
@@ -34,7 +41,9 @@ export const WALL_H = 1.9;
 // O térreo de serviço é o andar -1: plataforma maior, sempre presente, que não
 // conta agentes. É onde ficam as quatro estações e a porta do prédio.
 export const GROUND_FLOOR = -1;
-export const GROUND_PLATE = { x: PLATE.x + BAY, z: PLATE.z + 3 };
+// O térreo é maior que os andares: além das quatro estações, ele precisa da praça
+// de entrada, com espaço na frente da porta para quem chega e quem sai.
+export const GROUND_PLATE = { x: PLATE.x + BAY + 4, z: PLATE.z + 7 };
 
 /** A origem de uma plataforma no mundo. O escalonamento diagonal mora aqui. */
 export function platformOrigin(floor) {
@@ -61,21 +70,33 @@ export const plateOf = (floor) => (floor === GROUND_FLOOR ? GROUND_PLATE : { x: 
 export function platformShape(floor) {
   const p = plateOf(floor);
   const cut = 2.8;
+  const pts = [];
+  const add = (lx, lz) => pts.push(world(lx, lz, floor));
+
   // O chanfro fica no canto do fundo à **esquerda**: a baia da escada é à direita,
   // e chanfrar aquele canto era o que fazia o vão da escada furar a borda.
-  return [
-    world(cut, 0, floor),
-    world(p.x, 0, floor),
-    world(p.x, p.z, floor),
-    world(0, p.z, floor),
-    world(0, cut, floor),
-  ];
+  add(cut, 0);
+  add(p.x, 0);
+  add(p.x, p.z);
+
+  // O poço da escada: a baia é vazada em todo andar, da boca até a borda da frente.
+  // Quem sobe pisa nos patamares da escada, nunca na laje da baia.
+  if (floor > GROUND_FLOOR) {
+    add(BAY_X1, p.z);
+    add(BAY_X1, NOTCH_Z);
+    add(BAY_X0, NOTCH_Z);
+    add(BAY_X0, p.z);
+  }
+
+  add(0, p.z);
+  add(0, cut);
+  return pts;
 }
 
 // Entrada do prédio, na quina do térreo: quem chega de fora nasce aqui, e quem sai
 // caminha até aqui. Tem de ficar **sobre** a plataforma: fora dela, quem saía do
 // prédio caminhava para o vazio e parecia flutuar numa escada imaginária.
-export const DOOR = world(0.9, GROUND_PLATE.z - 1.2, GROUND_FLOOR);
+export const DOOR = world(2.6, GROUND_PLATE.z - 2.2, GROUND_FLOOR);
 
 // As quatro estações canônicas (CONTEXT.md): recurso singular no prédio inteiro,
 // sempre no térreo. A chave delas é global — há uma só de cada.
@@ -156,101 +177,104 @@ const GROUND_LANE = GROUND_PLATE.z - 1.4;
 
 // ── a escada ──────────────────────────────────────────────────────────────
 //
-// Cada andar tem uma escada na baia à direita, ligando-o ao de baixo. Como as
-// plataformas são escalonadas, a escada vence o deslocamento diagonal além da
-// altura: ela sai do pé no andar de baixo e chega ao topo no andar de cima.
+// Escada em U dentro de um **poço**: a baia à direita dos cômodos é vazada em todos
+// os andares, e a escada tem os patamares dela própria. Foi a terceira tentativa —
+// e a que fecha:
+//
+//   - Um lance reto só não vencia a altura do andar dentro da baia.
+//   - Com laje na baia, o pé do lance seguinte caía no vão aberto pelo lance
+//     anterior, porque o desenho repete a cada andar.
+//
+// Com poço, ninguém pisa em laje dentro da baia: o robô anda no corredor, entra no
+// patamar do andar (que é da escada), sobe meio lance até o patamar do meio, e sobe
+// o outro meio até o patamar do andar de cima. Descer é o mesmo caminho, invertido —
+// sempre pelo mesmo lado.
 
-export const STEPS = 9;                       // degraus por lance
-const stairFootLz = 5.6;                      // onde o lance encosta no andar de baixo
-const stairHeadLz = 1.8;                      // onde ele desembarca no andar de cima
-const stairLx = PLATE.x + BAY / 2;
+export const STEPS = 12;                      // degraus por lance (metade em cada meio)
+const HALF = STEPS / 2;
 
-/** O pé do lance que sai de `floor` para `floor + 1`, no andar de baixo. */
-export const stairFoot = (floor) => world(stairLx, stairFootLz, floor);
-/** O topo do mesmo lance, já no andar de cima. */
-export const stairHead = (floor) => world(stairLx, stairHeadLz, floor + 1);
+const LANDING_LZ = PLATE.z - 0.8;             // patamar de andar, na frente da baia
+const MID_LZ = 3.4;                           // patamar do meio, no fundo da baia
+const STAIR_CX = (BAY_X0 + BAY_X1) / 2;       // eixo da escada, no meio da baia
+const LANE_X = 0.9;                           // meio-lance de subida à direita, volta à esquerda
 
-// Largura útil do lance: cabem duas faixas de robô lado a lado. É o que permite
-// dois subirem ao mesmo tempo sem se atropelar (issue #18).
+/** Onde a laje é vazada para o poço, medindo do fundo do andar. */
+const NOTCH_Z = MID_LZ - 0.8;
+
+/** O patamar de um andar, dentro do poço: é dele que se sai e onde se chega. */
+export const stairLanding = (floor) => world(STAIR_CX, LANDING_LZ, floor);
+
+/** O patamar do meio do lance: meia altura entre dois andares, no fundo do poço. */
+export function stairMid(floor) {
+  const p = world(STAIR_CX, MID_LZ, floor);
+  return { ...p, wy: p.wy + LEVEL / 2 };
+}
+
+/** O pé do lance que sai de `floor` para `floor + 1`. */
+export const stairFoot = (floor) => stairLanding(floor);
+/** O desembarque do mesmo lance, no andar de cima. */
+export const stairHead = (floor) => stairLanding(floor + 1);
+
+/** Onde o robô espera no corredor para entrar no poço, no andar dado. */
+export const stairDoor = (floor) => world(BAY_X0 - 0.7, LANDING_LZ, floor);
+
+// Duas faixas por meio-lance: é o que permite dois subirem ao mesmo tempo sem se
+// atropelar (issue #18).
 export const STAIR_LANES = 2;
-const LANE_GAP = 0.95;
+const LANE_GAP = 1.4;   // o robô tem ~1,2 de largura: menos que isso e eles se cruzam
 
-/**
- * O deslocamento lateral da faixa `lane` no lance: perpendicular à subida. A
- * faixa 0 fica no meio-esquerda, a 1 no meio-direita.
- */
+/** O deslocamento lateral da faixa `lane`: sempre em x, ao lado do lance. */
 export function stairLaneOffset(floor, lane) {
-  const a = stairFoot(floor);
-  const b = stairHead(floor);
-  const dx = b.wx - a.wx;
-  const dz = b.wz - a.wz;
-  const len = Math.hypot(dx, dz) || 1;
-  // perpendicular no plano do chão
-  const px = -dz / len;
-  const pz = dx / len;
   const k = (lane % STAIR_LANES) - (STAIR_LANES - 1) / 2;
-  return { x: px * k * LANE_GAP, z: pz * k * LANE_GAP };
+  return { x: k * LANE_GAP, z: 0 };
 }
 
 /**
- * Os degraus de um lance, do pé ao topo, na faixa `lane`. Interpola posição e
- * altura: como o andar de cima está deslocado na diagonal, o lance sobe torto no
- * mundo — e é assim que ele aparece na referência.
+ * Os degraus do lance, do patamar de baixo ao de cima, na faixa `lane`: meio lance
+ * subindo pela direita do poço, meio voltando pela esquerda.
  */
 export function stairSteps(floor, lane = 0) {
-  const a = stairFoot(floor);
-  const b = stairHead(floor);
   const off = stairLaneOffset(floor, lane);
+  const a = stairLanding(floor);
+  const m = stairMid(floor);
+  const b = stairLanding(floor + 1);
   const out = [];
-  for (let i = 1; i <= STEPS; i++) {
-    const t = i / STEPS;
-    out.push({
-      wx: a.wx + (b.wx - a.wx) * t + off.x,
-      wy: a.wy + (b.wy - a.wy) * t,
-      wz: a.wz + (b.wz - a.wz) * t + off.z,
-      floor: t < 1 ? floor : floor + 1,
-    });
-  }
+  const leg = (from, to, n, side, endFloor) => {
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      out.push({
+        wx: from.wx + (to.wx - from.wx) * t + side * LANE_X + off.x,
+        wy: from.wy + (to.wy - from.wy) * t,
+        wz: from.wz + (to.wz - from.wz) * t,
+        floor: t === 1 ? endFloor : floor,
+      });
+    }
+  };
+  leg(a, m, HALF, 1, floor);            // sobe pela direita até o patamar do meio
+  leg(m, b, HALF, -1, floor + 1);       // e volta pela esquerda até o andar de cima
   return out;
 }
 
 /**
- * O vão da escada num andar: o buraco que a laje precisa ter para o lance que
- * chega do andar de baixo passar. Sem ele o robô sobe direto contra a laje — bate
- * a cabeça e atravessa o piso.
- *
- * Devolve o retângulo, em pontos de mundo, alinhado à direção do lance: da boca
- * do vão (onde o lance encontra a laje) até o desembarque.
+ * O poço da escada num andar: a baia vazada, da boca no fundo até a borda da frente.
+ * É o que o desenho recorta da laje e o que ganha guarda-corpo.
  */
-export const WELL_W = 3.6;     // largura do vão: um pouco mais que a escada
-export const WELL_LEN = 5.4;   // quanto ele avança sobre a laje, ao longo do lance
-export const WELL_LIP = 0.9;   // folga além do desembarque, para o último degrau caber
-
 export function stairWell(floor) {
-  const flight = floor - 1;                 // o lance que chega neste andar
-  const a = stairFoot(flight);
-  const b = stairHead(flight);
-  const dx = b.wx - a.wx;
-  const dz = b.wz - a.wz;
-  const len = Math.hypot(dx, dz) || 1;
-  const ux = dx / len;
-  const uz = dz / len;                       // direção da subida, no plano
-  const px = -uz;
-  const pz = ux;                             // perpendicular
-  const y = levelY(floor);
-
-  // Do desembarque para trás, ao longo do lance: é esse trecho que fica aberto. A
-  // boca avança um pouco além do desembarque, senão o último degrau cai exatamente
-  // na borda do vão e continua tapado pela laje.
-  const front = { x: b.wx + ux * WELL_LIP, z: b.wz + uz * WELL_LIP };
-  const back = { x: b.wx - ux * WELL_LEN, z: b.wz - uz * WELL_LEN };
-  const half = WELL_W / 2;
+  const p = plateOf(floor);
   return [
-    { wx: front.x + px * half, wy: y, wz: front.z + pz * half },
-    { wx: front.x - px * half, wy: y, wz: front.z - pz * half },
-    { wx: back.x - px * half, wy: y, wz: back.z - pz * half },
-    { wx: back.x + px * half, wy: y, wz: back.z + pz * half },
+    world(BAY_X0, NOTCH_Z, floor),
+    world(BAY_X1, NOTCH_Z, floor),
+    world(BAY_X1, p.z, floor),
+    world(BAY_X0, p.z, floor),
   ];
+}
+
+/** Um ponto está no poço da escada? Serve às invariantes: patamar não é laje. */
+export function inStairWell(p, floor) {
+  const o = platformOrigin(floor);
+  const lx = p.wx - o.x;
+  const lz = p.wz - o.z;
+  return lx >= BAY_X0 - 0.8 && lx <= BAY_X1 + 0.8 && lz >= NOTCH_Z - 0.8 && lz <= plateOf(floor).z + 0.8;
 }
 
 /** Onde o robô fica parado no cômodo: no meio, um pouco à frente. */
@@ -546,12 +570,21 @@ function stairsTo(scene, a, target, cmds) {
 
     const off = stairLaneOffset(flight, lane);
     const shift = (p) => ({ ...p, wx: p.wx + off.x, wz: p.wz + off.z });
+    // Entra no poço pelo corredor: primeiro a porta da escada, já no piso, depois o
+    // patamar do andar — que é da escada, não da laje.
+    const fromFloor = up ? flight : flight + 1;
+    const door = stairDoor(fromFloor);
     const board = shift(up ? stairFoot(flight) : stairHead(flight));
     const steps = stairSteps(flight, lane);
     const climb = up ? steps : [...steps].reverse().slice(1).concat([shift(stairFoot(flight))]);
 
-    walkAlong(scene, a, walkPath(a, board, board.floor === GROUND_FLOOR ? GROUND_LANE : LANE), cmds);
+    // A porta da escada e a entrada no patamar são chão: andar. Só os degraus são
+    // 'stair' — é o que deixa a asserção de faixa falar de degrau, e não de piso.
+    walkAlong(scene, a, walkPath(a, shift(door), fromFloor === GROUND_FLOOR ? GROUND_LANE : LANE), cmds);
+    walkAlong(scene, a, [board], cmds);
     walkAlong(scene, a, climb, cmds, 'stair');
+    // Sai do poço para o piso do andar de destino.
+    walkAlong(scene, a, [shift(stairDoor(up ? flight + 1 : flight))], cmds);
   }
   walkAlong(scene, a, walkPath(a, target, to === GROUND_FLOOR ? GROUND_LANE : LANE), cmds);
 }
