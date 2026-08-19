@@ -14,6 +14,8 @@ const plan = { agentId: 'ag-2', agentType: 'Plan' };
 const tdd = { agentId: 'ag-3', agentType: 'tdd' };
 const docs = { agentId: 'ag-4', agentType: 'docs' };
 const review = { agentId: 'ag-5', agentType: 'review' };
+// O sexto a entrar pega o sexto matiz — é ele que põe o rosa na planta (issue #17).
+const perf = { agentId: 'ag-6', agentType: 'general-purpose' };
 
 /** [espera em ms antes deste evento, evento] */
 export const SCRIPT = [
@@ -43,6 +45,10 @@ export const SCRIPT = [
   [400,  { ...plan, kind: 'tool_start', tool: 'TodoWrite', prop: { kind: 'whiteboard', key: 'whiteboard', label: 'quadro' } }],
   [1200, { ...explore, kind: 'stop', text: 'Achei 4 handlers: auth.ts, session.ts, guard.ts e o middleware legado da api v1.' }],
 
+  [400,  { ...main, kind: 'tool_start', tool: 'Task', text: 'medir o custo das consultas repetidas de sessão', prop: { kind: 'door', key: 'door', label: 'porta' } }],
+  [500,  { ...perf, kind: 'spawn' }],
+  [700,  { ...perf, kind: 'tool_start', tool: 'Grep', prop: { kind: 'cabinet', key: 'cabinet', label: 'arquivo morto', detail: 'findSession\\(' } }],
+
   [900,  { ...tdd, kind: 'tool_start', tool: 'Bash', prop: { kind: 'terminal', key: 'terminal', label: 'terminal', detail: 'npm test -- auth' } }],
   [1800, { ...plan, kind: 'stop', text: 'Plano em 3 etapas: extrair o guard, unificar a sessão, migrar o middleware v1.' }],
   [1000, { ...tdd, kind: 'tool_end', tool: 'Bash' }],
@@ -53,6 +59,7 @@ export const SCRIPT = [
   [400,  { ...docs, kind: 'stop', text: 'README atualizado.' }],
   [300,  { ...review, kind: 'stop', text: 'Revisão sem apontamentos.' }],   // o 2º andar é demolido
   [400,  { ...tdd, kind: 'stop', text: 'Suíte verde: 34 testes, 0 falhas.' }],
+  [500,  { ...perf, kind: 'stop', text: 'A sessão é buscada 3× por requisição; dá para resolver com um cache de pedido.' }],
   [700,  { ...main, kind: 'turn_end', text: 'Refatoração pronta e a suíte passou inteira.' }],
 ];
 

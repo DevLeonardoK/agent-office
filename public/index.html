@@ -331,14 +331,16 @@ select:focus-visible, input:focus-visible {
   overflow: hidden;
   display: grid;
   place-items: center;
-  /* grade da prancheta */
-  /* O fundo do palco é o "lado de fora" do diorama (ADR-0004): mais claro que o
-     azul de antes, para o escritório colorido assentar em algo, e ainda escuro o
-     bastante para os trilhos não sumirem. */
+  /* O fundo do palco é o "lado de fora" do diorama. No Sumida (ADR-0006) ele é o
+     céu da cidade: quase preto na borda, com o halo do néon subindo do meio. O halo
+     é o que faz a cena parecer iluminada por ela mesma — sem ele o escritório é um
+     recorte aceso colado num retângulo morto. */
   background:
-    repeating-linear-gradient(0deg, rgb(255 255 255 / .022) 0 1px, transparent 1px 44px),
-    repeating-linear-gradient(90deg, rgb(255 255 255 / .022) 0 1px, transparent 1px 44px),
-    radial-gradient(130% 100% at 50% 10%, #1b3040 0%, #0e1a24 74%);
+    repeating-linear-gradient(0deg, rgb(120 200 255 / .020) 0 1px, transparent 1px 44px),
+    repeating-linear-gradient(90deg, rgb(120 200 255 / .020) 0 1px, transparent 1px 44px),
+    radial-gradient(64% 48% at 50% 42%, rgb(53 230 255 / .13) 0%, rgb(53 230 255 / 0) 68%),
+    radial-gradient(42% 34% at 34% 72%, rgb(255 79 216 / .11) 0%, rgb(255 79 216 / 0) 70%),
+    radial-gradient(130% 100% at 50% 8%, #0d1a2a 0%, #04070d 76%);
 }
 
 #scene {
@@ -366,25 +368,141 @@ select:focus-visible, input:focus-visible {
 }
 
 .tag3d.station {
-  /* Escuro sobre o piso claro: com o escritório colorido (ADR-0004), o rótulo claro
-     de antes desaparecia no ladrilho. */
+  /* Claro sobre a cena escura (ADR-0006). O rótulo escuro de antes era feito para
+     o piso claro e sumiu por completo quando o escritório virou noite. */
   padding: 2px 6px;
-  color: hsl(200 22% 26%);
+  color: hsl(190 100% 78%);
   font: 600 var(--t-micro)/1.2 var(--mono);
   letter-spacing: .16em;
   text-transform: uppercase;
-  text-shadow: 0 1px 0 rgb(255 255 255 / .35);
+  text-shadow: 0 0 10px hsl(190 100% 60% / .55), 0 1px 2px rgb(0 0 0 / .9);
+}
+
+.cast-row { cursor: pointer; }
+.cast-row:focus-visible { outline: 2px solid hsl(190 90% 60%); outline-offset: -2px; }
+
+/* ── carta de personagem ─────────────────────────────────────────────────── */
+
+#card {
+  /* Fixa no canto do palco. Presa ao robô, ela escorregava enquanto se lia — e o
+     que diz de quem é a ficha é a cor da borda e o retrato, não onde ela está.
+     O recuo é a largura do trilho: o palco corre por baixo dos painéis, e um
+     `left: 14px` cru punha a ficha debaixo do elenco. */
+  position: absolute;
+  top: 14px;
+  left: calc(var(--rail-l) + 14px);
+  width: 260px;
+  z-index: 6;
+  padding: 14px;
+  /* Vidro escuro com a borda no matiz do agente: a carta pertence a ele, e a cor
+     dela é a única coisa que diz isso antes de o nome ser lido. */
+  background: hsl(214 52% 7% / .96);
+  border: 1px solid hsl(var(--h) 70% 52% / .55);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px hsl(214 60% 4% / .9), 0 18px 40px rgb(0 0 0 / .6),
+              0 0 28px hsl(var(--h) 90% 50% / .18);
+  color: var(--ink, #e8eef9);
+}
+#card[hidden] { display: none; }
+
+.card-x {
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 22px; height: 22px;
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  border-radius: 3px;
+  color: hsl(205 30% 55%);
+  font: 400 15px/1 var(--sans);
+  cursor: pointer;
+}
+.card-x:hover { color: hsl(190 90% 74%); background: hsl(190 60% 40% / .14); }
+.card-x:focus-visible { outline: 2px solid hsl(190 90% 60%); }
+
+.card-top { display: flex; gap: 12px; align-items: flex-start; }
+.card-face { width: 62px; height: 62px; flex: none; }
+
+.card-name {
+  font: 600 14px/1.25 var(--sans);
+  color: hsl(var(--h) 70% 76%);
+  word-break: break-word;
+}
+#card[data-main] .card-name {
+  background: linear-gradient(90deg, #e85d5d, #e8a13d, #e3d24a, #4fbc86, #5b95d6, #a97fd0);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.card-role {
+  font: 400 var(--t-micro)/1.4 var(--mono);
+  color: hsl(205 22% 52%);
+  letter-spacing: .04em;
+}
+.card-state {
+  margin-top: 5px;
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid hsl(190 60% 45% / .4);
+  border-radius: 2px;
+  font: 500 var(--t-micro)/1.5 var(--mono);
+  color: hsl(190 60% 74%);
+  text-transform: uppercase;
+  letter-spacing: .1em;
+}
+.card-state[data-s="error"] { color: hsl(350 85% 74%); border-color: hsl(350 70% 55% / .5); }
+.card-state[data-s="working"] { color: hsl(150 65% 70%); border-color: hsl(150 55% 45% / .45); }
+
+.card-rows { margin: 14px 0 0; display: grid; gap: 1px; background: hsl(214 40% 16% / .8); border: 1px solid hsl(214 40% 16% / .8); }
+.card-rows > div {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px;
+  padding: 6px 8px;
+  background: hsl(214 50% 9%);
+}
+.card-rows dt {
+  font: 500 var(--t-micro)/1.4 var(--mono);
+  color: hsl(205 20% 48%);
+}
+.card-rows dd {
+  margin: 0;
+  font: 500 var(--t-micro)/1.4 var(--mono);
+  color: hsl(200 30% 82%);
+  word-break: break-word;
+}
+
+.card-say {
+  margin: 12px 0 0;
+  padding-left: 9px;
+  border-left: 2px solid hsl(var(--h) 70% 52% / .5);
+  font: 400 var(--t-small, .8125rem)/1.45 var(--sans);
+  color: hsl(205 25% 70%);
+}
+
+.tag3d.space {
+  /* Nome do espaço, escrito no chão dele: discreto, porque é referência de
+     endereço e não informação de agora. */
+  padding: 2px 6px;
+  color: hsl(205 48% 64%);
+  font: 700 var(--t-micro)/1.2 var(--mono);
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 3px rgb(0 0 0 / .85);
 }
 
 .tag3d.prop {
-  /* Etiqueta de papel: fundo claro sobre a cena clara, texto escuro. */
+  /* Etiqueta de vidro: escura sobre a cena escura, com a borda acesa. A etiqueta
+     de papel clara de antes virava o ponto mais brilhante da tela e roubava o
+     robô. */
   padding: 2px 6px;
-  background: hsl(44 40% 94%);
-  border: 1px solid hsl(40 25% 66%);
+  background: hsl(214 45% 9% / .92);
+  border: 1px solid hsl(190 80% 52% / .5);
   border-radius: 2px;
-  color: hsl(30 30% 24%);
+  color: hsl(190 60% 84%);
   font: 500 var(--t-micro)/1.2 var(--mono);
-  box-shadow: 0 1px 2px rgb(0 0 0 / .25);
+  box-shadow: 0 0 12px hsl(190 90% 50% / .18);
 }
 
 .tag3d.plate {
@@ -513,10 +631,14 @@ select:focus-visible, input:focus-visible {
     <canvas id="scene"></canvas>
     <div id="overlay" aria-live="off"></div>
 
+    <!-- A carta de personagem: quem é o agente e o que ele faz agora. A planta diz
+         onde ele está; isto diz quem ele é. -->
+    <div id="card" role="dialog" aria-label="Ficha do agente" hidden></div>
+
 
     <div id="empty">
       <span class="tag">prédio vazio</span>
-      <p>Peça alguma coisa ao Claude Code. Cada agente vivo ganha um cômodo no 1º andar.</p>
+      <p>Peça alguma coisa ao Claude Code. Cada agente vivo ganha um posto numa das três salas.</p>
     </div>
   </main>
 

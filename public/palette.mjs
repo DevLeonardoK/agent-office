@@ -8,53 +8,73 @@
 /** Matiz, saturação e luz em HSL, no formato que o three e o CSS entendem. */
 export const hsl = (h, s, l) => ({ h, s, l });
 
-// ── o prédio ──────────────────────────────────────────────────────────────
+// ── o escritório ──────────────────────────────────────────────────────────
 //
-// Amarelo nas paredes, piso claro em xadrez, laje creme: é a leitura de
-// escritório iluminado, no espírito da referência. Nada aqui é saturado ao ponto
-// de competir com a carcaça de um robô — o prédio é claro, os robôs são vivos.
+// Direção **Sumida** (ADR-0006): a cidade molhada vista de cima. Azul-petróleo
+// profundo no chão e nas paredes, e a cor forte reservada ao que é luz — a fita de
+// néon na quina da parede, a tela acesa, o robô.
+//
+// A regra que sustenta isso inverteu-se: antes o escritório era claro e o robô se
+// achava por ser saturado sobre superfície clara. Agora o fundo é escuro e de valor
+// baixo, e **quem emite é quem se lê**. Toda superfície grande fica abaixo de 30% de
+// luz; nada aqui compete com um robô aceso.
 
 export const BUILDING = {
-  wall: hsl(44, 0.82, 0.60),          // parede amarela, cheia
-  wallTrim: hsl(38, 0.62, 0.40),      // arremate do topo, mais escuro
-  // Piso e laje quase sem matiz: assim eles não disputam faixa da roda de cores com
-  // os agentes, e a leitura ali fica por conta do valor.
-  floorA: hsl(38, 0.14, 0.90),        // ladrilho creme
-  floorB: hsl(186, 0.50, 0.66),       // ladrilho alternado, azul-piscina
-  slab: hsl(36, 0.16, 0.50),          // espessura da laje
-  divider: hsl(0, 0, 0.96),           // divisória entre cômodos, branca
-  stair: hsl(28, 0.52, 0.56),         // degrau
-  landing: hsl(28, 0.44, 0.44),       // patamar
-  rail: hsl(196, 0.66, 0.52),         // guarda-corpo
-  terrain: hsl(118, 0.42, 0.40),      // o terreno, verde de grama
-  sidewalk: hsl(40, 0.26, 0.78),      // calçada
+  wall: hsl(214, 0.42, 0.24),         // parede azul-noite
+  wallTrim: hsl(196, 0.95, 0.58),     // a fita de néon no topo da parede — isto é luz
+  floorA: hsl(213, 0.44, 0.24),       // piso das salas e do corredor, escuro e polido
+  floorB: hsl(232, 0.52, 0.28),       // piso do saguão: violeta, para a entrada se ler de longe
+  slab: hsl(214, 0.45, 0.11),         // espessura da laje
+  divider: hsl(205, 0.35, 0.30),      // divisória entre salas
+  stair: hsl(28, 0.70, 0.44),         // soleira da porta
+  landing: hsl(28, 0.60, 0.34),
+  rail: hsl(196, 0.90, 0.50),         // guarda-corpo, no mesmo ciano da fita
+  terrain: hsl(215, 0.55, 0.11),      // a rua molhada em volta
+  sidewalk: hsl(212, 0.40, 0.15),     // calçada
+};
+
+/** O ciano e o magenta que fazem o Sumida. Só aparecem como luz, nunca como área. */
+export const NEON = {
+  cool: hsl(190, 1.00, 0.62),
+  hot: hsl(322, 1.00, 0.66),
 };
 
 // ── os móveis ─────────────────────────────────────────────────────────────
 //
-// Cada tipo tem cor própria: com mobília fixa (issue #14) são poucos volumes por
-// cômodo, e a cor passa a ser o que distingue mesa de estante de longe.
+// Seis matizes distintos, cada um a pelo menos 14° do vizinho: com poucos volumes
+// por sala, é a cor que distingue mesa de estante de longe. No Sumida eles são
+// escuros — o que os separa do piso é matiz e aresta acesa, não valor.
 
 export const PROPS = {
-  desk: hsl(24, 0.58, 0.36),          // madeira
-  shelf: hsl(8, 0.72, 0.46),          // estante vermelha
-  terminal: hsl(212, 0.48, 0.40),     // terminal, azul
-  library: hsl(150, 0.58, 0.38),      // biblioteca verde
-  whiteboard: hsl(0, 0, 0.94),        // quadro branco
-  cabinet: hsl(50, 0.82, 0.52),       // arquivo morto, mostarda
-  screen: hsl(196, 0.60, 0.26),       // vidro apagado
-  screenLit: hsl(186, 0.85, 0.60),    // vidro aceso
+  whiteboard: hsl(168, 0.55, 0.32),   // quadro, verde-água
+  terminal: hsl(190, 0.62, 0.32),     // terminal, ciano
+  desk: hsl(214, 0.45, 0.30),         // mesa, azul-aço
+  cabinet: hsl(258, 0.45, 0.36),      // arquivo morto, violeta
+  shelf: hsl(322, 0.58, 0.36),        // estante, magenta
+  library: hsl(350, 0.55, 0.36),      // biblioteca, rosa-carmim
+  screen: hsl(200, 0.60, 0.13),       // vidro apagado
+  screenLit: hsl(186, 1.00, 0.66),    // vidro aceso — isto é luz
 };
 
 // ── os agentes ────────────────────────────────────────────────────────────
 //
-// Seis matizes (issue #17), escolhidos para se separarem entre si **e** das cores do
-// prédio (ADR-0004). As faixas proibidas são as do fundo: amarelo da parede (44),
-// azulado do ladrilho (186) e verde do terreno (120), cada uma com 20° de margem.
-// Foi isso que tirou o laranja e o âmbar da paleta — eles caíam na faixa da parede.
+// Seis matizes, escolhidos para se separarem entre si **e** do fundo (ADR-0004). O
+// Sumida moveu esta lista: com o escritório azul, a faixa de 193° a 252° virou fundo
+// inteiro, e os antigos 214 (azul) e 334 (magenta) caíam dentro dela — dois robôs
+// que sumiriam na própria parede. Foi o preço previsto ao escolher a direção.
+// O sexto é o **rosa** (issue #17), e ele existe de propósito: numa paleta que já
+// tem violeta e magenta, é o rosa que fecha a volta sem colidir com nenhum dos dois.
 // O principal não usa matiz: leva o arco-íris.
 
-export const AGENT_HUES = [8, 84, 152, 214, 268, 334];
+export const AGENT_HUES = [28, 76, 152, 262, 300, 332];
+
+/**
+ * A luz da carcaça do robô. Mora aqui, e não no renderizador, porque é o número
+ * que o `selftest` compara com o fundo — duplicado, ele saía de sincronia com o
+ * desenho na primeira vez que alguém clareasse o robô, e a asserção passaria a
+ * afirmar um robô que não existe mais.
+ */
+export const SHELL_L = 0.66;
 
 /** O vermelho do rosto de erro. Não pode se confundir com matiz de agente. */
 export const ERROR_HUE = 0;
